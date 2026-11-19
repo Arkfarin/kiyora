@@ -11,6 +11,10 @@ pub struct ProjectionReader {
     pub(crate) binding: Binding,
 }
 impl ProjectionReader {
+    pub async fn track(&self, id: Uuid) -> Result<Option<Track>, SyncError> {
+        self.read(move |db| db.track(id)).await
+    }
+
     pub async fn listening_history(&self) -> Result<Vec<vault_db::ListeningEntry>, SyncError> {
         self.read(Database::listening_history).await
     }
@@ -135,6 +139,15 @@ impl ProjectionReader {
         limit: u32,
     ) -> Result<Vec<vault_db::AlbumSummary>, SyncError> {
         self.read(move |db| db.albums(&query, offset, limit)).await
+    }
+    pub async fn catalog_tracks(
+        &self,
+        album: Option<String>,
+        artist: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Track>, SyncError> {
+        self.read(move |db| db.catalog_tracks(album.as_deref(), &artist, offset, limit)).await
     }
     pub async fn artists(
         &self,

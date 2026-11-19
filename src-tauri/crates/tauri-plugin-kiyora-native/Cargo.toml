@@ -25,7 +25,7 @@ tokio.workspace = true
 ndk-context = "0.1"
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
-souvlaki = "0.8.3"
+kiyora-desktop-media = { path = "../kiyora-desktop-media" }
 vault-media.workspace = true
 uuid.workspace = true
 tempfile.workspace = true

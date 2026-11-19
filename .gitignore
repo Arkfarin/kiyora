@@ -38,3 +38,17 @@ test-results/
 # Browser verification artifacts
 /test-results/
 /playwright-report/
+
+# Flutter local build outputs (generated bindings remain tracked).
+/flutter/.dart_tool/
+/flutter/build/
+/flutter/.flutter-plugins-dependencies
+/flutter/android/local.properties
+/flutter/linux/flutter/ephemeral/
+/flutter/windows/flutter/ephemeral/
+/flutter/android/.gradle/
+/flutter/android/.kotlin/
+/flutter/**/*.iml
+/flutter/android/app/src/main/jniLibs/
+!/flutter/windows/runner/*.rc
+!/flutter/windows/runner/*.manifest

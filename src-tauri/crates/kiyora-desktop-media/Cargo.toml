@@ -1,0 +1,17 @@
+[package]
+name = "kiyora-desktop-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+souvlaki = "0.8.3"
+vault-media.workspace = true
+uuid.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+url = "2"
+
+[lints]
+workspace = true

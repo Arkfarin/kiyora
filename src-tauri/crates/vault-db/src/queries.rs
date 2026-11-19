@@ -47,6 +47,42 @@ pub struct ArtistSummary {
 }
 
 impl Database {
+    /// Exact catalog membership, distinct from full-text search. Filtering before
+    /// pagination keeps albums and artists complete in large libraries.
+    pub fn catalog_tracks(
+        &self,
+        album: Option<&str>,
+        artist: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Track>, DbError> {
+        let sql = if album.is_some() {
+            "SELECT json FROM tracks WHERE vault_id=?1 AND album=?2 AND COALESCE(NULLIF(json_extract(json,'$.metadata.album_artist'),''),performer)=?3 ORDER BY CAST(json_extract(json,'$.metadata.disc_number') AS INTEGER),CAST(json_extract(json,'$.metadata.track_number') AS INTEGER),title,track_id LIMIT ?4 OFFSET ?5"
+        } else {
+            "SELECT json FROM tracks WHERE vault_id=?1 AND ?2 IS NULL AND performer=?3 ORDER BY album,CAST(json_extract(json,'$.metadata.disc_number') AS INTEGER),CAST(json_extract(json,'$.metadata.track_number') AS INTEGER),title,track_id LIMIT ?4 OFFSET ?5"
+        };
+        let mut statement = self.connection.prepare(sql)?;
+        let rows = statement.query_map(
+            params![self.binding.vault_id.to_string(), album, artist, limit.clamp(1, 500), offset],
+            |row| row.get::<_, String>(0),
+        )?;
+        rows.map(|row| serde_json::from_str(&row?).map_err(DbError::from)).collect()
+    }
+
+    /// Indexed lookup for player/editor details; never loads the whole projection.
+    pub fn track(&self, id: Uuid) -> Result<Option<Track>, DbError> {
+        let raw: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT json FROM tracks WHERE vault_id=?1 AND track_id=?2",
+                params![self.binding.vault_id.to_string(), id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        raw.map(|json| serde_json::from_str(&json).map_err(DbError::from))
+            .transpose()
+    }
+
     pub fn has_applied_operation(&self, op: Uuid) -> Result<bool, DbError> {
         Ok(self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM applied_events WHERE vault_id=?1 AND op_id=?2)",
