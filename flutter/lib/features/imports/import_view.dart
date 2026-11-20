@@ -32,7 +32,10 @@ class _ImportViewState extends State<ImportView> {
   }
 
   void _refresh() {
-    setState(() => _jobs = jobs.list(sessionId: b.sessionId));
+    final pending = jobs.list(sessionId: b.sessionId);
+    setState(() {
+      _jobs = pending;
+    });
   }
 
   Future<void> _pick() async {

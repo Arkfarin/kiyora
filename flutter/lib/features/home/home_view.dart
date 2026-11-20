@@ -5,7 +5,6 @@ import '../../core/bridge/generated/api.dart' as api;
 import '../../core/routing/navigation.dart';
 import '../../core/state/backend_controller.dart';
 import '../../core/widgets/artwork.dart';
-import '../library/library_view.dart';
 import '../library/track_actions.dart';
 
 class HomeView extends StatefulWidget {
@@ -52,10 +51,13 @@ class _HomeViewState extends State<HomeView> {
         results[5] as List<content.Artist>,
       );
     }();
-    if (mounted)
-      setState(() => _data = future);
-    else
+    if (mounted) {
+      setState(() {
+        _data = future;
+      });
+    } else {
       _data = future;
+    }
   }
 
   @override

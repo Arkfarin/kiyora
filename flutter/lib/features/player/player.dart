@@ -105,7 +105,7 @@ class TransportControls extends StatelessWidget {
             onPressed: !enabled
                 ? null
                 : () => backend.editQueue(
-                    api.QueueEdit.shuffle(enabled: !q!.shuffle),
+                    api.QueueEdit.shuffle(enabled: !q.shuffle),
                   ),
             icon: const Icon(Icons.shuffle),
           ),
@@ -169,7 +169,7 @@ class TransportControls extends StatelessWidget {
                 ? null
                 : () => backend.editQueue(
                     api.QueueEdit.repeat(
-                      mode: switch (q!.repeat) {
+                      mode: switch (q.repeat) {
                         api.Repeat.off => api.Repeat.all,
                         api.Repeat.all => api.Repeat.one,
                         api.Repeat.one => api.Repeat.off,
@@ -294,13 +294,16 @@ class PlayerBar extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       TransportControls(backend: backend),
-                      PlaybackProgress(backend: backend),
+                      SizedBox(
+                        height: 28,
+                        child: PlaybackProgress(backend: backend),
+                      ),
                     ],
                   ),
                 ),
               ),
-              Expanded(
-                flex: 2,
+              SizedBox(
+                width: 144,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [

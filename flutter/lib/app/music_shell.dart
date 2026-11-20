@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/bridge/generated/api/edits.dart' as edits;
@@ -85,6 +86,29 @@ class _MusicShellState extends State<MusicShell> {
   void _openPanel(ContextPanel panel) {
     if (MediaQuery.sizeOf(context).width >= 1200) {
       setState(() => _panel = _panel == panel ? null : panel);
+    } else if (defaultTargetPlatform == TargetPlatform.linux) {
+      showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          child: SizedBox(
+            width: 440,
+            height: MediaQuery.sizeOf(context).height * .8,
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    tooltip: 'Закрыть панель',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+                Expanded(child: _panelContent(panel)),
+              ],
+            ),
+          ),
+        ),
+      );
     } else {
       showModalBottomSheet<void>(
         context: context,
@@ -100,7 +124,8 @@ class _MusicShellState extends State<MusicShell> {
   }
 
   void _openPlayer() {
-    if (MediaQuery.sizeOf(context).width >= 1200) {
+    if (defaultTargetPlatform == TargetPlatform.linux ||
+        MediaQuery.sizeOf(context).width >= 1200) {
       _openPanel(ContextPanel.playing);
       return;
     }
@@ -195,7 +220,10 @@ class _MusicShellState extends State<MusicShell> {
     listenable: _navigation,
     builder: (context, _) {
       final location = _navigation.current;
-      final mobile = MediaQuery.sizeOf(context).width < 900;
+      final width = MediaQuery.sizeOf(context).width;
+      final mobile =
+          defaultTargetPlatform != TargetPlatform.linux && width < 900;
+      final compactLibrary = _compactLibrary || (!mobile && width < 1040);
       final tokens = Theme.of(context).extension<KiyoraColors>()!;
       final player = PlayerBar(
         backend: b,
@@ -281,16 +309,17 @@ class _MusicShellState extends State<MusicShell> {
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Row(
                               children: [
-                                const SizedBox(
-                                  width: 130,
-                                  child: Text(
-                                    'KIYORA',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w900,
+                                if (width >= 900)
+                                  const SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      'KIYORA',
+                                      style: TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w900,
+                                      ),
                                     ),
                                   ),
-                                ),
                                 IconButton(
                                   tooltip: 'Назад',
                                   onPressed: _navigation.canBack
@@ -362,7 +391,7 @@ class _MusicShellState extends State<MusicShell> {
                               builder: (context, c) {
                                 final right =
                                     _panel != null && c.maxWidth >= 1184;
-                                final leftWidth = _compactLibrary
+                                final leftWidth = compactLibrary
                                     ? 72.0
                                     : _leftWidth.clamp(
                                         220.0,
@@ -385,7 +414,7 @@ class _MusicShellState extends State<MusicShell> {
                                             Row(
                                               children: [
                                                 IconButton(
-                                                  tooltip: _compactLibrary
+                                                  tooltip: compactLibrary
                                                       ? 'Раскрыть медиатеку'
                                                       : 'Свернуть медиатеку',
                                                   onPressed: () => setState(
@@ -396,7 +425,7 @@ class _MusicShellState extends State<MusicShell> {
                                                     Icons.library_music,
                                                   ),
                                                 ),
-                                                if (!_compactLibrary) ...[
+                                                if (!compactLibrary) ...[
                                                   const Expanded(
                                                     child: Text(
                                                       'Моя медиатека',
@@ -419,7 +448,7 @@ class _MusicShellState extends State<MusicShell> {
                                                 ],
                                               ],
                                             ),
-                                            if (_compactLibrary) ...[
+                                            if (compactLibrary) ...[
                                               IconButton(
                                                 tooltip: 'Медиатека',
                                                 onPressed: () =>
