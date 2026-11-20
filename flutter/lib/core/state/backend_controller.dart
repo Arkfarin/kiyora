@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+
 import '../bridge/generated/api/auth.dart' as auth;
 import '../bridge/generated/api/content.dart' as content;
 import '../bridge/generated/api/edits.dart' as edits;
@@ -28,6 +30,8 @@ class BackendController extends ChangeNotifier {
   bool _closing = false;
   Future<void>? _starting;
   Future<void>? _switching;
+  Future<void>? _closeFuture;
+  bool _started = false;
   Timer? _refreshTimer;
 
   String get sessionId {
@@ -38,8 +42,14 @@ class BackendController extends ChangeNotifier {
 
   bool get hasLibrary => session?.vaultId != null;
 
-  Future<void> start({String? resources, BigInt? windowHandle}) => _starting ??=
-      _start(resources, windowHandle).whenComplete(() => _starting = null);
+  Future<void> start({String? resources, BigInt? windowHandle}) {
+    if (_closing) return Future.error(StateError('KIYORA is closing'));
+    if (_started) return Future.value();
+    return _starting ??= _start(
+      resources,
+      windowHandle,
+    ).whenComplete(() => _starting = null);
+  }
 
   Future<void> _start(String? resources, BigInt? windowHandle) async {
     starting = true;
@@ -50,10 +60,14 @@ class BackendController extends ChangeNotifier {
         resources: resources,
         windowHandle: windowHandle,
       );
+      if (_closing) return;
       profiles = await api.profiles();
+      if (_closing) return;
       await _attach();
+      _started = true;
     } catch (e) {
       error = e;
+      rethrow;
     } finally {
       starting = false;
       notifyListeners();
@@ -66,10 +80,15 @@ class BackendController extends ChangeNotifier {
   Future<void> _chooseProfile(String id) async {
     await action(() async {
       await _detach();
-      session = null;
-      _clearSession();
-      session = await api.switchProfile(profileId: id);
-      await _attach();
+      try {
+        final next = await api.switchProfile(profileId: id);
+        _clearSession();
+        session = next;
+      } finally {
+        // Backend validates the target before releasing the previous profile.
+        // A rejected switch must restore subscriptions to that live session.
+        await _attach();
+      }
     });
   }
 
@@ -78,9 +97,13 @@ class BackendController extends ChangeNotifier {
       final profile = await api.createProfile(label: label.trim());
       profiles = await api.profiles();
       await _detach();
-      _clearSession();
-      session = await api.switchProfile(profileId: profile.id);
-      await _attach();
+      try {
+        final next = await api.switchProfile(profileId: profile.id);
+        _clearSession();
+        session = next;
+      } finally {
+        await _attach();
+      }
     });
   }
 
@@ -223,10 +246,15 @@ class BackendController extends ChangeNotifier {
       }
     } finally {
       await feed.close();
+      if (identical(_feed, feed)) _feed = null;
     }
-    // Recovery is bounded by the session epoch, with retry backoff.
+    // Five attempts, then retain the error and expose explicit refresh/retry.
     var delay = 1;
-    while (!_closing && epoch == _epoch) {
+    for (
+      var attempt = 0;
+      attempt < 5 && !_closing && epoch == _epoch;
+      attempt++
+    ) {
       await Future<void>.delayed(Duration(seconds: delay));
       if (_closing || epoch != _epoch) return;
       try {
@@ -292,7 +320,11 @@ class BackendController extends ChangeNotifier {
   }
 
   Future<void> refresh() => action(() async {
-    await _snapshot(_epoch);
+    if (_feed == null) {
+      await _attach();
+    } else {
+      await _snapshot(_epoch);
+    }
   });
   Future<void> transport(api.Transport command) => action(() async {
     final epoch = _epoch;
@@ -355,10 +387,30 @@ class BackendController extends ChangeNotifier {
     await vault.synchronize(sessionId: sessionId, operation: operation);
     await _snapshot(_epoch);
   });
-  Future<void> close() async {
+  Future<void> close() =>
+      _closeFuture ??= _close().whenComplete(() => _closeFuture = null);
+
+  Future<void> _close() async {
     _closing = true;
-    await _detach();
-    await api.shutdown();
+    try {
+      await _detach();
+      // If exit races startup, let initialization settle before shutting down
+      // the runtime it created. An initialization error is already displayed.
+      try {
+        await _starting;
+      } catch (e) {
+        error = e;
+      }
+      await api.shutdown();
+      _started = false;
+      session = null;
+      _clearSession();
+    } catch (e) {
+      _closing = false;
+      error = e;
+      notifyListeners();
+      rethrow;
+    }
   }
 }
 
