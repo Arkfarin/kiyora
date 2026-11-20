@@ -1,36 +1,92 @@
-# Kiyora
+<div align="center">
 
-Kiyora is a Tauri application with a Rust backend for a personal Telegram music
-vault. The active Rust workspace is in `src-tauri`.
+# KIYORA
 
-The React interface includes profile-aware setup, a responsive library/player,
-imports, metadata/artwork/lyrics editing, playlists and offline cache controls.
-See [music UI implementation and acceptance](docs/MUSIC_UI_ACCEPTANCE.md) for
-current behavior, compatibility constraints, checks and Linux/Android commands.
+**Your music. Your library. Your control.**
 
-Run `pnpm build` for the production frontend and `pnpm test:ui` for isolated
-Chromium component checks. Test fixtures are not included in the application.
+A personal music player and library built around Telegram-backed storage.
 
-Run `bash src-tauri/scripts/check-backend.sh` for the offline backend checks.
-Use the [native packaging instructions](src-tauri/docs/packaging.md) to build
-installers with TDLib for Linux, Windows and Android. A standalone Cargo build
-does not bundle TDLib. Current verification and remaining work are recorded in
-[backend readiness](docs/BACKEND_READINESS.md) and the
-[completion report](docs/BACKEND_COMPLETION_REPORT.md). Readiness remains
-`RELEASE_BLOCKED` until Windows, physical-device and live-account acceptance pass.
+![Status](https://img.shields.io/badge/STATUS-UNDER_ACTIVE_DEVELOPMENT-e5484d?style=for-the-badge)
+![Flutter](https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
 
-For Android, run `pnpm android:doctor` to check the local toolchain, then
-`pnpm android:apk` to build a signed ARM64 debug APK with bundled TDLib.
-The APK is written to
-`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
-`pnpm android:apk:release` builds a signed release APK using the local private key; see
-[Android setup and signing](src-tauri/docs/packaging.md#android-arm64).
+</div>
 
-Use `kiyora-cli vault discover` for bounded lookup of a saved or named vault,
-or `kiyora-cli vault discover --deep` to recover renamed/legacy channels.
-See [Vault discovery](src-tauri/docs/vault-discovery.md) for limits, JSON output,
-cancellation and manual attachment.
+---
 
-## Recommended IDE Setup
+## 🚧 UNDER ACTIVE DEVELOPMENT
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+> [!WARNING]
+> **KIYORA IS NOT READY FOR GENERAL USE.**
+>
+> Kiyora is an unfinished project undergoing active development. Features, interfaces, and internal APIs are subject to change. Some functionality may be incomplete, unstable, or unavailable.
+>
+> **There is no stable release yet.** Please do not rely on the current code as your only way to access important music or data.
+
+## About Kiyora
+
+**Kiyora** is a personal music library and player designed to bring your music collection, playback, and organization into one application, using Telegram as the storage foundation.
+
+The goal is a clean, responsive listening experience backed by a native Rust engine — with control over your library, playlists, metadata, and locally cached music.
+
+Kiyora is being built with **Flutter** for the interface and **Rust** for core functionality.
+
+## What Kiyora Is Working Toward
+
+- **Telegram-backed music vault** — manage a personal music collection through Telegram-based storage.
+- **Built-in music player** — play, pause, seek, shuffle, repeat, and manage the playback queue.
+- **Organized library** — browse and search tracks, albums, artists, and playlists.
+- **Music management** — import audio, edit metadata and artwork, and manage playlists.
+- **Lyrics** — view track lyrics, including timed lyrics where available.
+- **Offline listening** — use locally cached audio when it is available.
+- **Library recovery and sync** — reconnect to an existing vault and keep the local library in sync.
+
+> These are project goals and development areas, **not a checklist of finished or verified features**.
+
+## Technology
+
+| Layer | Technology |
+| --- | --- |
+| User interface | [Flutter](https://flutter.dev/) / Dart |
+| Core engine | [Rust](https://www.rust-lang.org/) |
+| Flutter ↔ Rust communication | [flutter_rust_bridge](https://cjycode.com/flutter_rust_bridge/) |
+| Telegram integration | [TDLib](https://core.telegram.org/tdlib) |
+| Local library data | SQLite |
+
+The design keeps the user interface separate from the Rust engine responsible for library operations, synchronization, and playback.
+
+## Platform Roadmap
+
+| Platform | Current priority |
+| --- | --- |
+| 🐧 Linux | **Primary development focus** |
+| 🤖 Android | Planned after the Linux experience is stabilized |
+| 🪟 Windows | Planned after the Linux experience is stabilized |
+
+Platform support and release timing are not guaranteed. A working source tree does not necessarily mean that an installable, tested build is available.
+
+## Building from Source
+
+Kiyora is currently a development project, not a finished application with a supported installation process.
+
+The Flutter application is located in [`flutter/`](flutter/). Native integration, generated bindings, and platform-specific dependencies may be required to build and run it.
+
+For technical context, see the [Flutter migration notes](docs/FLUTTER_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_RELEASE_READINESS.md). These documents may lag behind ongoing development.
+
+**No stable binaries or one-command setup are promised at this stage.**
+
+## Project Status
+
+The immediate priority is building a stable, usable **Linux application** before expanding platform support. The interface, native integration, reliability, and packaging are all subject to continued development.
+
+If you are following the project, expect frequent changes and occasional breakage while the architecture and user experience are refined.
+
+---
+
+<div align="center">
+
+**KIYORA — Made for your music. Still in the making.**
+
+[Source Code](https://github.com/Arkfarin/kiyora) · [Issues](https://github.com/Arkfarin/kiyora/issues)
+
+</div>
