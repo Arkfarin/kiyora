@@ -5,6 +5,8 @@ pub mod edits;
 pub mod imports;
 pub mod jobs;
 pub mod offline;
+#[cfg(test)]
+mod tests;
 pub mod vault;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
@@ -13,6 +15,9 @@ use uuid::Uuid;
 use vault_core::{ApiError, Backend, ErrorCode};
 
 static RUNTIME: RwLock<Option<Runtime>> = RwLock::const_new(None);
+// Lifecycle calls are serialized independently of in-flight API readers. Exit
+// must reach Backend::shutdown (which cancels jobs) before waiting for readers.
+static LIFECYCLE: Mutex<()> = Mutex::const_new(());
 struct Runtime {
     backend: Arc<Backend>,
     closed: CancellationToken,
@@ -44,8 +49,12 @@ fn id(value: &str) -> Result<Uuid, BridgeError> {
     Uuid::parse_str(value).map_err(|_| invalid())
 }
 async fn runtime() -> Result<RwLockReadGuard<'static, Runtime>, BridgeError> {
-    RwLockReadGuard::try_map(RUNTIME.read().await, Option::as_ref)
-        .map_err(|_| ApiError::new(ErrorCode::Closed).into())
+    let state = RwLockReadGuard::try_map(RUNTIME.read().await, Option::as_ref)
+        .map_err(|_| BridgeError::from(ApiError::new(ErrorCode::Closed)))?;
+    if state.closed.is_cancelled() {
+        return Err(ApiError::new(ErrorCode::Closed).into());
+    }
+    Ok(state)
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +84,13 @@ pub async fn initialize(
     resources: Option<String>,
     window_handle: Option<u64>,
 ) -> Result<Option<Session>, BridgeError> {
+    let _lifecycle = LIFECYCLE.lock().await;
+    {
+        let slot = RUNTIME.read().await;
+        if let Some(state) = slot.as_ref() {
+            return restore_session(state).await;
+        }
+    }
     let mut slot = RUNTIME.write().await;
     if slot.is_none() {
         {
@@ -108,6 +124,13 @@ pub async fn initialize(
     let state = slot
         .as_ref()
         .ok_or_else(|| ApiError::new(ErrorCode::Closed))?;
+    restore_session(state).await
+}
+
+async fn restore_session(state: &Runtime) -> Result<Option<Session>, BridgeError> {
+    if state.closed.is_cancelled() {
+        return Err(ApiError::new(ErrorCode::Closed).into());
+    }
     // Repeated Flutter attachment never recreates the engine or profile session.
     if let Some(context) = state.backend.context().await {
         return Ok(Some(context.into()));
@@ -121,12 +144,17 @@ pub async fn initialize(
 
 /// Only the application owner calls this, never a widget's dispose callback.
 pub async fn shutdown() -> Result<(), BridgeError> {
-    let mut slot = RUNTIME.write().await;
-    if let Some(state) = slot.as_ref() {
-        state.backend.shutdown().await?;
-        state.closed.cancel();
+    let _lifecycle = LIFECYCLE.lock().await;
+    {
+        let slot = RUNTIME.read().await;
+        if let Some(state) = slot.as_ref() {
+            // Reject new commands and wake event feeds immediately. Taking a
+            // write lock here would wait for jobs that only shutdown can cancel.
+            state.closed.cancel();
+            state.backend.shutdown().await?;
+        }
     }
-    *slot = None;
+    *RUNTIME.write().await = None;
     Ok(())
 }
 pub async fn profiles() -> Result<Vec<Profile>, BridgeError> {
