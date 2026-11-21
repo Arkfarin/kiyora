@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api/edits.dart' as edits;
 import '../../core/bridge/generated/api.dart' as api;

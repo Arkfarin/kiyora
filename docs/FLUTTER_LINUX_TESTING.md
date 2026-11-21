@@ -35,7 +35,7 @@ The temporary profiles are removed by the runner after the checks.
 
 ## Current automated evidence
 
-- Flutter unit/widget suite: 21 tests passed.
+- Flutter unit/widget suite: 24 tests passed.
 - Controller tests use an explicitly isolated mock FRB API. They cover duplicate
   startup, failed startup/retry, failed profile switch, exit/start races, failed
   shutdown/retry, snapshot/runtime restoration, buffered playback events during
@@ -48,10 +48,11 @@ The temporary profiles are removed by the runner after the checks.
 - Widget tests exercise initial Home/import rendering and desktop navigation and
   player layout at 720, 900, 1280 and 1440 logical pixels. They use test data,
   not a Telegram account.
-- Targeted Dart analysis of the controller and its regression tests passed
-  with no issues. Whole-project Flutter analysis reports 17 pre-existing
-  informational deprecations (Material imports, reorder and radio callbacks),
-  so its default exit status is currently nonzero.
+- Whole-project `flutter analyze --no-pub` passes with no issues. Material UI
+  is pinned to 1.11.1; the deprecated Material imports, reorder callback and
+  profile radio callbacks have been migrated. Widget regressions cover actual
+  drag gestures in both queue directions and keyboard profile selection with
+  the busy guard. The Linux debug bundle was rebuilt successfully afterward.
 
 - Native integration: both seed and process-restart restore passed. Real FRB
   calls verified single initialization, profile creation/switching, stale-session

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../bridge/generated/api/auth.dart' as auth;
 import '../bridge/generated/api/content.dart' as content;
 

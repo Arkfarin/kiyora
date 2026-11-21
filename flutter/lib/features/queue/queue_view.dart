@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api.dart' as api;
 import '../../core/state/backend_controller.dart';
@@ -97,8 +98,7 @@ class _QueueViewState extends State<QueueView> {
                     )
                   : null,
               itemCount: _page.items.length,
-              onReorder: (from, to) {
-                if (to > from) to--;
+              onReorderItem: (from, to) {
                 if (from == to) return;
                 widget.backend.editQueue(
                   api.QueueEdit.move(

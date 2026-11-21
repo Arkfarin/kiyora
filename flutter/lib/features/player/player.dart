@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import '../../core/bridge/generated/api.dart' as api;
 import '../../core/state/backend_controller.dart';

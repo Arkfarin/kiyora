@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/vault.dart' as vault;

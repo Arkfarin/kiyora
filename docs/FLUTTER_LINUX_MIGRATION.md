@@ -77,7 +77,8 @@ Current risks and next gates:
 
 1. Real Telegram/Vault/import/playback and migration acceptance are unverified.
 2. Core features exist in source but need scenario-by-scenario runtime checks.
-3. Whole-project analysis has 17 deprecated-API infos on Flutter 3.50.0.
+3. Whole-project analysis now passes on Flutter 3.50.0 / Material UI 1.11.1;
+   future SDK changes still require widget and native regression checks.
 4. Desktop import drop handling, settings/window persistence, notifications and
    complete keyboard/accessibility behavior need implementation/coverage audits.
 5. Actual large-library rendering/performance is not established by paging tests.

@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/offline.dart' as offline;
 import '../../core/state/backend_controller.dart';
@@ -36,23 +37,27 @@ class _SettingsViewState extends State<SettingsView> {
       children: [
         Text(
           'Настройки',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
+          style: Theme.of(context).textTheme.headlineMedium
+              ?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 28),
         _title('Аккаунт'),
-        for (final profile in b.profiles)
-          RadioListTile<String>(
-            value: profile.id,
-            groupValue: b.session?.profileId,
-            title: Text(profile.label),
-            onChanged: b.busy
-                ? null
-                : (id) {
-                    if (id != null) b.chooseProfile(id);
-                  },
+        RadioGroup<String>(
+          groupValue: b.session?.profileId,
+          onChanged: (id) {
+            if (!b.busy && id != null) b.chooseProfile(id);
+          },
+          child: Column(
+            children: [
+              for (final profile in b.profiles)
+                RadioListTile<String>(
+                  value: profile.id,
+                  title: Text(profile.label),
+                  enabled: !b.busy,
+                ),
+            ],
           ),
+        ),
         ListTile(
           title: const Text('Подключиться снова'),
           subtitle: Text(b.details?.connection ?? ''),
@@ -191,9 +196,8 @@ class _SettingsViewState extends State<SettingsView> {
     padding: const EdgeInsets.only(bottom: 12),
     child: Text(
       title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+      style: Theme.of(context).textTheme.titleLarge
+          ?.copyWith(fontWeight: FontWeight.bold),
     ),
   );
 }
