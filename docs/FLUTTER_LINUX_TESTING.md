@@ -21,10 +21,21 @@ From `src-tauri/`:
 cargo test --locked -p kiyora-flutter-bridge
 ```
 
+Real Dart → generated FRB → Rust, from the repository root:
+
+```sh
+python3 flutter/tool/test_native.py
+```
+
+This runner builds the locked Rust bridge, creates a temporary data directory,
+uses a private `dbus-run-session`, and runs separate seed and restore processes.
+It requires `flutter`, `cargo` and `dbus-run-session` on PATH. It deliberately
+points TDLib at a nonexistent file: no authentication or network operations run.
+The temporary profiles are removed by the runner after the checks.
+
 ## Current automated evidence
 
-- Flutter suite: 20 tests passed before the final additional operation-cancellation
-  regression; controller suite subsequently passed all 13 tests.
+- Flutter unit/widget suite: 21 tests passed.
 - Controller tests use an explicitly isolated mock FRB API. They cover duplicate
   startup, failed startup/retry, failed profile switch, exit/start races, failed
   shutdown/retry, snapshot/runtime restoration, buffered playback events during
@@ -42,9 +53,17 @@ cargo test --locked -p kiyora-flutter-bridge
   informational deprecations (Material imports, reorder and radio callbacks),
   so its default exit status is currently nonzero.
 
+- Native integration: both seed and process-restart restore passed. Real FRB
+  calls verified single initialization, profile creation/switching, stale-session
+  rejection, queue revision conflicts, queue events, refresh, cancellation-token
+  calls, pending receive wakeup on close/shutdown, closed-runtime errors, and
+  durable active-profile/Shuffle/Repeat restoration. There are no mock API calls
+  in this suite. It does not start the audio device or connect Telegram.
+- Rust bridge: 2 tests passed (feed cancellation and lifecycle/profile durability).
+
 ## Acceptance still required
 
-Native FRB execution, actual Telegram authentication/Vault sync, audible playback,
+Actual Telegram authentication/Vault sync, audible playback,
 queue mutations during playback, real data upgrade, offline/reconnect, MPRIS/media
 keys, Wayland/X11 window behavior, clean installation and packaged launch need
 separate evidence. Unit/widget tests do not prove these scenarios.
