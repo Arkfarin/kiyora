@@ -118,16 +118,35 @@ class BackendController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _detach() async {
+  Future<void> _detach({bool cancelOperation = true}) async {
     _epoch++;
     _refreshTimer?.cancel();
     _refreshTimer = null;
-    final operation = _operation;
-    _operation = null;
-    await operation?.cancel();
+    final operation = cancelOperation ? _operation : null;
+    if (cancelOperation) _operation = null;
     final feed = _feed;
     _feed = null;
+    await operation?.cancel();
     await feed?.close();
+  }
+
+  Future<void> _resubscribe() async {
+    // Fence the old consumer, delayed reconnects and outstanding reads before
+    // subscribing again. The new feed buffers events while its snapshot loads.
+    final detached = _detach(cancelOperation: false);
+    final epoch = _epoch;
+    await detached;
+    if (_closing || epoch != _epoch) return;
+    try {
+      await _attach();
+    } catch (e) {
+      if (!_closing && epoch == _epoch) {
+        error = e;
+        notifyListeners();
+        unawaited(_reconnectFeed(epoch));
+      }
+      rethrow;
+    }
   }
 
   Future<void> _attach() async {
@@ -165,9 +184,14 @@ class BackendController extends ChangeNotifier {
     }
     final state = await api.playback(sessionId: id);
     final queued = await api.queue(sessionId: id, offset: 0, limit: 1);
+    final status = await vault.status();
     if (epoch != _epoch) return BigInt.zero;
+    if (status.session.sessionId != id) {
+      throw StateError('The active profile changed while refreshing');
+    }
     playback.value = state;
     queue.value = queued.queue;
+    runtime = status;
     // An unconnected profile is valid and must still show onboarding.
     if (info.connection != 'not_started') {
       try {
@@ -193,8 +217,7 @@ class BackendController extends ChangeNotifier {
         if (event == null) break;
         if (event.change is api.Change_Resync) {
           // Replace the damaged feed before taking a fresh snapshot.
-          await feed.close();
-          await _attach();
+          await _resubscribe();
           return;
         }
         if (event.session?.sessionId != session?.sessionId) continue;
@@ -234,7 +257,8 @@ class BackendController extends ChangeNotifier {
           case api.Change_Sync():
             notifyListeners();
           case api.Change_Refresh():
-            watermark = await _snapshot(epoch);
+            await _resubscribe();
+            return;
           case api.Change_Resync():
             break;
         }
@@ -248,6 +272,10 @@ class BackendController extends ChangeNotifier {
       await feed.close();
       if (identical(_feed, feed)) _feed = null;
     }
+    await _reconnectFeed(epoch);
+  }
+
+  Future<void> _reconnectFeed(int epoch) async {
     // Five attempts, then retain the error and expose explicit refresh/retry.
     var delay = 1;
     for (
@@ -319,13 +347,7 @@ class BackendController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> refresh() => action(() async {
-    if (_feed == null) {
-      await _attach();
-    } else {
-      await _snapshot(_epoch);
-    }
-  });
+  Future<void> refresh() => action(_resubscribe);
   Future<void> transport(api.Transport command) => action(() async {
     final epoch = _epoch;
     final state = await api.control(sessionId: sessionId, action: command);
@@ -369,7 +391,7 @@ class BackendController extends ChangeNotifier {
       apiId: apiId,
       apiHash: apiHash,
     );
-    await _snapshot(_epoch);
+    await _resubscribe();
   });
   Future<void> login(auth.Login input) => operate((operation) async {
     authorization = await auth.authenticate(
@@ -377,15 +399,15 @@ class BackendController extends ChangeNotifier {
       input: input,
       operation: operation,
     );
-    await _snapshot(_epoch);
+    await _resubscribe();
   });
   Future<void> reconnect() => action(() async {
     authorization = await auth.reconnect(sessionId: sessionId);
-    await _snapshot(_epoch);
+    await _resubscribe();
   });
   Future<void> synchronize() => operate((operation) async {
     await vault.synchronize(sessionId: sessionId, operation: operation);
-    await _snapshot(_epoch);
+    await _resubscribe();
   });
   Future<void> close() =>
       _closeFuture ??= _close().whenComplete(() => _closeFuture = null);
