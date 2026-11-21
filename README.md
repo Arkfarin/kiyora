@@ -71,7 +71,7 @@ Kiyora is currently a development project, not a finished application with a sup
 
 The Flutter application is located in [`flutter/`](flutter/). Native integration, generated bindings, and platform-specific dependencies may be required to build and run it.
 
-For technical context, see the [Flutter migration notes](docs/FLUTTER_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_RELEASE_READINESS.md). These documents may lag behind ongoing development.
+For technical context, see the [Flutter migration notes](docs/FLUTTER_LINUX_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_LINUX_RELEASE.md). Verification scope and remaining checks are recorded in the [Linux testing notes](docs/FLUTTER_LINUX_TESTING.md).
 
 **No stable binaries or one-command setup are promised at this stage.**
 

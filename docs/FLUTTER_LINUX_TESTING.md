@@ -61,11 +61,18 @@ The temporary profiles are removed by the runner after the checks.
   in this suite. It does not start the audio device or connect Telegram.
 - Rust bridge: 2 tests passed (feed cancellation and lifecycle/profile durability).
 
+- Debug Linux bundle build passed. `ldd` resolved executable and Rust library
+  dependencies. First-frame window and normal close (exit 0) passed on Umbriel
+  native Wayland and X11 via XWayland with disposable data and working directory
+  `/tmp`. See [release notes](FLUTTER_LINUX_RELEASE.md) for limits and bus teardown
+  diagnostics. These were automated compositor-level smoke checks, not manual
+  visual acceptance or an installed release.
+
 ## Acceptance still required
 
 Actual Telegram authentication/Vault sync, audible playback,
 queue mutations during playback, real data upgrade, offline/reconnect, MPRIS/media
-keys, Wayland/X11 window behavior, clean installation and packaged launch need
+keys, broader Wayland/X11 window behavior, clean installation and packaged launch need
 separate evidence. Unit/widget tests do not prove these scenarios.
 
 The historical `FLUTTER_MIGRATION.md` and `FLUTTER_RELEASE_READINESS.md` describe

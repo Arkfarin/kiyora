@@ -1,3 +1,9 @@
+> Historical notes: superseded for the current Linux-first task by
+> [Linux migration](FLUTTER_LINUX_MIGRATION.md),
+> [testing](FLUTTER_LINUX_TESTING.md), [release](FLUTTER_LINUX_RELEASE.md),
+> and [UI acceptance](FLUTTER_LINUX_UI_ACCEPTANCE.md).
+> Earlier no-testing and concurrent-platform plans below are no longer current.
+
 # Flutter release readiness — NOT READY
 
 The Rust adapter and shared desktop media library compile on Linux. Binding
