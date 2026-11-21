@@ -80,3 +80,22 @@ The historical `FLUTTER_MIGRATION.md` and `FLUTTER_RELEASE_READINESS.md` describ
 an earlier source-only stage and contain stale no-testing and cross-platform
 plans. The current Linux-first task requires testing. Do not treat those older
 statements as current acceptance evidence or instructions to skip verification.
+
+## Native offline playback and MPRIS regression
+
+`python3 flutter/tool/test_playback.py` passed on CachyOS with PipeWire 1.6.11's
+PulseAudio server. It requires `pactl`, `parec`, `playerctl`, `dbus-run-session`,
+Flutter and Cargo. It creates a private D-Bus, disposable library and dedicated
+null sink, never changes the default output and removes its sink afterward.
+
+Real generated FRB calls exercise cached playback/progress, Pause/Resume, paused
+seek, MPRIS metadata/Play/Pause/Next/Previous, rapid toggles, reorder, removing the
+current track, recovery after an unavailable source, refresh and shutdown. The
+monitor captured 458,752 PCM samples, including 28,602 nontrivial signal samples
+in the recorded passing run. This establishes decoded PCM output to the virtual
+sink, not listening through physical speakers. Telegram is never contacted.
+
+This test reproduced a >10-second stall in souvlaki's D-Bus detach behind queued
+status updates. The local dependency patch is documented in
+`src-tauri/vendor/souvlaki/KIYORA-PATCH.md`. With the bounded dispatcher and
+prioritized shutdown the scenario passed in about two seconds.

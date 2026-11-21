@@ -8,6 +8,7 @@ edition = "2024"
 [workspace]
 resolver = "3"
 members = [".", "crates/*"]
+exclude = ["vendor/souvlaki"]
 
 [workspace.package]
 version = "0.1.0"
@@ -90,3 +91,7 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Linux MPRIS: bound dispatch and prioritize shutdown; see vendor patch notes.
+[patch.crates-io]
+souvlaki = { path = "vendor/souvlaki" }

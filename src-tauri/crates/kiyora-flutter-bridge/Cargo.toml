@@ -34,5 +34,7 @@ jni = "=0.21.1"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
 [dev-dependencies]
+serde_json.workspace = true
+vault-protocol.workspace = true
 tempfile.workspace = true
 vault-security.workspace = true
