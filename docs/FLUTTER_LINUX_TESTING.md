@@ -110,6 +110,18 @@ of KIYORA. The application uses the Secret Service API. KWallet's Secret Service
 provider is compatible with that interface; a live KWallet-specific acceptance
 run has not yet been completed. No user secret-service selection was changed.
 
+## Extracted release package
+
+On 2026-11-24 the release tar built by `tool/package_desktop.py` passed
+`tool/verify_linux_package.py ARCHIVE --window-smoke`. This checks archive and
+TDLib hashes, required payload/licenses and host dependency resolution, then
+uses the actual extracted release bridge and TDLib for all three authentication
+process phases above. No native rebuild occurs during package verification.
+The separate release executable showed its first-frame window and closed
+normally on Umbriel Wayland and XWayland. The package ran outside the repository
+from a path containing spaces. See the release document for artifact identity,
+commands, glibc observations and unverified installation/compatibility limits.
+
 The historical `FLUTTER_MIGRATION.md` and `FLUTTER_RELEASE_READINESS.md` describe
 an earlier source-only stage and contain stale no-testing and cross-platform
 plans. The current Linux-first task requires testing. Do not treat those older

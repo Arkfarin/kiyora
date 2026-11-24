@@ -35,7 +35,14 @@ bundle = (flutter_root / 'build/windows/x64/runner' / mode.capitalize() if windo
           flutter_root / 'build/linux/x64' / mode / 'bundle')
 native = rust_root / 'target/native/desktop'
 for name in ('native', 'licenses'):
-    shutil.copytree(native / name, bundle / name, dirs_exist_ok=True)
+    destination = bundle / name
+    if not windows and name == 'licenses':
+        destination /= 'native'
+    shutil.copytree(native / name, destination, dirs_exist_ok=True)
+if not windows:
+    shutil.copytree(rust_root / 'licenses', bundle / 'licenses', dirs_exist_ok=True)
+    shutil.copy2(rust_root / 'vendor/souvlaki/LICENSE', bundle / 'licenses/souvlaki-LICENSE')
+    shutil.copy2(rust_root / 'vendor/souvlaki/KIYORA-PATCH.md', bundle / 'licenses/souvlaki-PATCH.md')
 for item in native.glob('*.json'):
     if item.name != 'tauri-bundle.json':
         shutil.copy2(item, bundle / item.name)

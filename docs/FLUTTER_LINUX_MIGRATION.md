@@ -82,7 +82,9 @@ Current risks and next gates:
 4. Desktop import drop handling, settings/window persistence, notifications and
    complete keyboard/accessibility behavior need implementation/coverage audits.
 5. Actual large-library rendering/performance is not established by paging tests.
-6. Release packaging, dependency baseline, clean installation, bridge-generation
-   reproducibility and Linux-only CI remain open. No workflow currently exists.
+6. A release tar now passes extraction, native setup/recovery and Wayland/XWayland
+   window smoke checks on CachyOS. Distribution baselines, clean installation,
+   bridge-generation reproducibility and Linux-only CI remain open. No workflow
+   currently exists.
 
 Do not start Windows or Android work as a continuation of these gates.

@@ -1,7 +1,8 @@
 # Linux build and release status
 
-No stable release or validated installer is available from this checkpoint.
-The verified artifact is a **debug development bundle**, not a release package.
+No stable release or validated system installer is available from this checkpoint.
+A release tar package has now passed extraction, native authentication setup and
+first-frame/normal-close checks on the current CachyOS host (2026-11-24).
 
 ## Reproduced build
 
@@ -62,7 +63,7 @@ Private D-Bus helper processes logged disconnection messages when their test bus
 was torn down after application exit. This was not a clean installation test,
 visual acceptance, or a test of native Xorg/KDE/GNOME.
 
-## TDLib and packaging path still to validate
+## TDLib and verified tar packaging
 
 Plain `flutter build linux` does not bundle TDLib. Onboarding/profile-only tests
 do not need it and do not prove Telegram connectivity. The native resolver accepts
@@ -77,16 +78,45 @@ python3 flutter/tool/package_desktop.py
 
 On Linux it prepares pinned native sources, builds a release bundle, adds TDLib
 and license files, and creates a tar archive with SHA256SUMS under
-`flutter/build/packages/`. An optional `--deb` path also exists. Neither output
-has been built/installed/validated in this checkpoint. Do not infer a supported
-Debian baseline from its hard-coded dependency list, or compatibility with older
-glibc from a CachyOS build.
+`flutter/build/packages/`. The Linux payload now includes the existing decoder
+licenses and the license/patch notice for the modified MPRIS dependency.
 
-Before distribution: verify the release artifact's TDLib lifecycle, all shared
-libraries and glibc requirements, executable permissions, launcher/icon, license
-payload, extraction/installation into paths containing spaces, launch outside the
-repository, normal shutdown/reopen and removal without deleting profiles.
-Use one validated distribution format first. No automatic release publication.
+Verified artifact: `flutter/build/packages/kiyora-flutter-linux-x64-release.tar.gz`
+(33,019,310 bytes in this run). SHA-256:
+`582a8f1e4c5339ef41034862eac0e9be0208861093db9906e78d20dc5cd4d5cd`.
+
+```sh
+python3 flutter/tool/verify_linux_package.py \
+  flutter/build/packages/kiyora-flutter-linux-x64-release.tar.gz --window-smoke
+```
+
+The verifier checks the archive digest, required payload and license files,
+executable permissions, pinned TDLib identity/digest and host dynamic dependency
+resolution. It extracts into a temporary path containing spaces and runs the
+actual packaged Rust bridge/TDLib through first connection, unavailable keyring
+and process-restart recovery. It uses the bundle resource resolver, without a
+developer TDLib override or a native rebuild. The optional `--window-smoke` uses
+the Umbriel compositor to check real Wayland and XWayland first-frame windows
+(1280×720) and ordinary close (exit 0), with disposable data and an unrelated
+working directory. It removes only the temporary extraction and test data.
+
+To run the tar distribution, extract it into a user-owned directory, keep its
+`lib/`, `native/`, `data/` and `licenses/` together, then launch `./kiyora`. The
+extracted directory can be removed without deleting the separately stored
+profiles. An unlocked Secret Service provider is needed for account connection.
+
+The host uses glibc 2.44. Directly bundled ELF files require symbols up to
+GLIBC_2.38; this is a lower-bound observation, not compatibility certification
+for every system with glibc 2.38. System GTK/ALSA/D-Bus and other dependencies
+must also be available. No older-distribution baseline has been tested.
+
+An optional `--deb` path exists but remains unvalidated. Do not infer Debian
+support from its hard-coded dependency list. No release has been published.
+
+Before distribution: complete real account/Vault/playback acceptance, a clean
+machine installation, launcher/icon integration, the full third-party notice
+audit and supported-distribution dependency baselines. The current tar checks
+do not constitute stable release acceptance. No automatic release publication.
 
 ## Diagnostics and uninstall
 

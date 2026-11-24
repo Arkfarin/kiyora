@@ -31,7 +31,7 @@ void main() {
         await backend.close();
         RustLib.dispose();
       });
-      await backend.start();
+      await backend.start(resources: env['KIYORA_NATIVE_RESOURCES']);
       final phase = env['KIYORA_NATIVE_TEST_PHASE'];
       final profileMarker = File('$root/profile-id');
       if (phase == 'seed') {
