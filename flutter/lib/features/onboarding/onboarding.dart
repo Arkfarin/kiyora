@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/vault.dart' as vault;
 import '../../core/state/backend_controller.dart';
@@ -13,8 +14,6 @@ class Onboarding extends StatefulWidget {
 
 class _OnboardingState extends State<Onboarding> {
   final _name = TextEditingController();
-  final _apiId = TextEditingController();
-  final _apiHash = TextEditingController();
   final _input = TextEditingController();
   List<vault.Candidate>? _candidates;
   Type? _lastAuth;
@@ -23,7 +22,7 @@ class _OnboardingState extends State<Onboarding> {
 
   @override
   void dispose() {
-    for (final c in [_name, _apiId, _apiHash, _input]) {
+    for (final c in [_name, _input]) {
       c.clear();
       c.dispose();
     }
@@ -52,9 +51,8 @@ class _OnboardingState extends State<Onboarding> {
             children: [
               Text(
                 'KIYORA',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+                style: Theme.of(context).textTheme.headlineLarge
+                    ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 40),
               if (b.starting) ...[
@@ -120,48 +118,12 @@ class _OnboardingState extends State<Onboarding> {
         authorization is auth.Authorization_ParametersRequired ||
         authorization is auth.Authorization_Closed) {
       return [
-        _heading('Подключите хранилище'),
-        const Text(
-          'Музыка хранится в вашем Telegram. Параметры приложения нужны для входа; они сохраняются средствами защиты устройства.',
-        ),
-        const SizedBox(height: 20),
-        if (b.details?.apiConfigured == true) ...[
-          FilledButton(
-            onPressed: b.busy ? null : b.reconnect,
-            child: const Text('Продолжить вход'),
-          ),
-          const SizedBox(height: 24),
-        ],
-        const SelectableText(
-          'Получите API ID и API hash в разделе API development tools на my.telegram.org.',
-        ),
-        const SizedBox(height: 20),
-        TextField(
-          controller: _apiId,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'API ID'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _apiHash,
-          obscureText: true,
-          enableSuggestions: false,
-          autocorrect: false,
-          decoration: const InputDecoration(labelText: 'API hash'),
-        ),
+        _heading('Ваша музыка в Telegram'),
+        const Text('Войдите в свой аккаунт, чтобы открыть коллекцию.'),
         const SizedBox(height: 20),
         FilledButton(
-          onPressed: b.busy
-              ? null
-              : () async {
-                  final id = int.tryParse(_apiId.text.trim());
-                  if (id == null || id <= 0 || _apiHash.text.trim().isEmpty)
-                    return;
-                  final hash = _apiHash.text.trim();
-                  _apiHash.clear();
-                  await b.connect(id, hash);
-                },
-          child: const Text('Подключить Telegram'),
+          onPressed: b.busy ? null : b.connect,
+          child: const Text('Войти в Telegram'),
         ),
       ];
     }
@@ -298,12 +260,10 @@ class _OnboardingState extends State<Onboarding> {
         Text(switch (authorization) {
           auth.Authorization_RegistrationRequired() =>
             'Сначала завершите регистрацию в официальном приложении Telegram.',
-          auth.Authorization_PremiumRequired() =>
-            'Telegram требует Premium для этого способа входа. Завершите вход в официальном приложении.',
+          auth.Authorization_PremiumRequired() => 'Telegram требует Premium для этого способа входа. Завершите вход в официальном приложении.',
           auth.Authorization_LoggingOut() ||
           auth.Authorization_Closing() => 'Завершаем сеанс…',
-          _ =>
-            'Этот шаг авторизации пока не поддерживается. Попробуйте подключиться снова.',
+          _ => 'Этот шаг авторизации пока не поддерживается. Попробуйте подключиться снова.',
         }),
         TextButton(
           onPressed: b.busy ? null : b.reconnect,
@@ -349,9 +309,8 @@ class _OnboardingState extends State<Onboarding> {
     padding: const EdgeInsets.only(bottom: 16),
     child: Text(
       text,
-      style: Theme.of(
-        context,
-      ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+      style: Theme.of(context).textTheme.headlineMedium
+          ?.copyWith(fontWeight: FontWeight.bold),
     ),
   );
   void _createProfile() {

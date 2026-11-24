@@ -5,21 +5,17 @@
 
 import '../api.dart';
 import '../frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'auth.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `from`
 
-Future<Authorization> connect({
-  required String sessionId,
-  required int apiId,
-  required String apiHash,
-}) => RustLib.instance.api.crateApiAuthConnect(
-  sessionId: sessionId,
-  apiId: apiId,
-  apiHash: apiHash,
-);
+/// Connect with the bundled application configuration. Existing profiles keep
+/// their original OS-protected configuration; never change their application ID.
+Future<Authorization> connect({required String sessionId}) =>
+    RustLib.instance.api.crateApiAuthConnect(sessionId: sessionId);
 
 Future<Authorization> status({required String sessionId}) =>
     RustLib.instance.api.crateApiAuthStatus(sessionId: sessionId);

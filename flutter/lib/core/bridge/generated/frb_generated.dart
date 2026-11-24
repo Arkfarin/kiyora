@@ -11,11 +11,14 @@ import 'api/imports.dart';
 import 'api/jobs.dart';
 import 'api/offline.dart';
 import 'api/vault.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -172,11 +175,7 @@ abstract class RustLibApi extends BaseApi {
     required Operation operation,
   });
 
-  Future<Authorization> crateApiAuthConnect({
-    required String sessionId,
-    required int apiId,
-    required String apiHash,
-  });
+  Future<Authorization> crateApiAuthConnect({required String sessionId});
 
   Future<Playback> crateApiControl({
     required String sessionId,
@@ -1102,18 +1101,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
-  Future<Authorization> crateApiAuthConnect({
-    required String sessionId,
-    required int apiId,
-    required String apiHash,
-  }) {
+  Future<Authorization> crateApiAuthConnect({required String sessionId}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(sessionId, serializer);
-          sse_encode_i_32(apiId, serializer);
-          sse_encode_String(apiHash, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1126,16 +1119,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_bridge_error,
         ),
         constMeta: kCrateApiAuthConnectConstMeta,
-        argValues: [sessionId, apiId, apiHash],
+        argValues: [sessionId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiAuthConnectConstMeta => const TaskConstMeta(
-    debugName: "connect",
-    argNames: ["sessionId", "apiId", "apiHash"],
-  );
+  TaskConstMeta get kCrateApiAuthConnectConstMeta =>
+      const TaskConstMeta(debugName: "connect", argNames: ["sessionId"]);
 
   @override
   Future<Playback> crateApiControl({

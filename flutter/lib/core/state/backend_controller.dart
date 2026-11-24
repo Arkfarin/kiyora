@@ -385,12 +385,8 @@ class BackendController extends ChangeNotifier {
       rethrow; // A conflict is shown; never silently apply to a different order.
     }
   });
-  Future<void> connect(int apiId, String apiHash) => action(() async {
-    authorization = await auth.connect(
-      sessionId: sessionId,
-      apiId: apiId,
-      apiHash: apiHash,
-    );
+  Future<void> connect() => action(() async {
+    authorization = await auth.connect(sessionId: sessionId);
     await _resubscribe();
   });
   Future<void> login(auth.Login input) => operate((operation) async {

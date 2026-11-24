@@ -35,7 +35,7 @@ The temporary profiles are removed by the runner after the checks.
 
 ## Current automated evidence
 
-- Flutter unit/widget suite: 24 tests passed.
+- Flutter unit/widget suite: 26 tests passed (2026-11-24).
 - Controller tests use an explicitly isolated mock FRB API. They cover duplicate
   startup, failed startup/retry, failed profile switch, exit/start races, failed
   shutdown/retry, snapshot/runtime restoration, buffered playback events during
@@ -75,6 +75,34 @@ Actual Telegram authentication/Vault sync, audible playback,
 queue mutations during playback, real data upgrade, offline/reconnect, MPRIS/media
 keys, broader Wayland/X11 window behavior, clean installation and packaged launch need
 separate evidence. Unit/widget tests do not prove these scenarios.
+
+## Bundled application credentials and initial TDLib connection
+
+On 2026-11-24, `python3 flutter/tool/test_build_config.py` passed: missing release
+configuration, explicitly missing debug configuration, malformed JSON, invalid
+credentials and public Unix permissions fail without disclosing configuration
+contents. Unconfigured debug builds remain possible for offline development.
+The supplied private configuration was confirmed present in the native library
+and absent from tracked/new source files, including generated Dart.
+
+Two onboarding widget regressions verify that users see no application credential
+fields, that duplicate clicks are fenced, that phone and QR steps remain reachable,
+and that an unconfigured build presents an error without asking users for API keys.
+The Linux debug bundle and Rust bridge tests also passed.
+
+`python3 flutter/tool/test_auth.py` passed against real TDLib on CachyOS. It checks
+the real Dart → FRB → Rust `connect` call up to `PhoneRequired`, disconnects, then
+checks reconnection using the profile's saved credentials. It requires Flutter,
+Cargo, pinned TDLib, `dbus-run-session` and `gnome-keyring-daemon`. All profiles,
+keyring data, config/cache/runtime directories and D-Bus connections are isolated;
+the test never supplies a phone number, code, password or QR account approval.
+TDLib may access the network. Reaching phone entry does not prove successful
+account authentication or Telegram's acceptance of the application credentials.
+
+GNOME Keyring is a provider used by this test harness, not a runtime dependency
+of KIYORA. The application uses the Secret Service API. KWallet's Secret Service
+provider is compatible with that interface; a live KWallet-specific acceptance
+run has not yet been completed. No user secret-service selection was changed.
 
 The historical `FLUTTER_MIGRATION.md` and `FLUTTER_RELEASE_READINESS.md` describe
 an earlier source-only stage and contain stale no-testing and cross-platform

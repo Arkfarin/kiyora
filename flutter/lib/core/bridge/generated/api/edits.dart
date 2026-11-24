@@ -7,6 +7,7 @@ import '../api.dart';
 import '../frb_generated.dart';
 import 'auth.dart';
 import 'content.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'edits.freezed.dart';

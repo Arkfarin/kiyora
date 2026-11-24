@@ -964,15 +964,11 @@ fn wire__crate__api__auth__connect_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_session_id = <String>::sse_decode(&mut deserializer);
-            let api_api_id = <i32>::sse_decode(&mut deserializer);
-            let api_api_hash = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::BridgeError>(
                     (move || async move {
-                        let output_ok =
-                            crate::api::auth::connect(api_session_id, api_api_id, api_api_hash)
-                                .await?;
+                        let output_ok = crate::api::auth::connect(api_session_id).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,

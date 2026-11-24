@@ -87,16 +87,23 @@ impl Default for Operation {
     }
 }
 
-pub async fn connect(
-    session_id: String,
-    api_id: i32,
-    api_hash: String,
-) -> Result<Authorization, BridgeError> {
-    let secret = zeroize::Zeroizing::new(api_hash);
-    Ok(runtime()
-        .await?
+/// Connect with the bundled application configuration. Existing profiles keep
+/// their original OS-protected configuration; never change their application ID.
+pub async fn connect(session_id: String) -> Result<Authorization, BridgeError> {
+    let runtime = runtime().await?;
+    let session_id = id(&session_id)?;
+    if runtime
         .backend
-        .connect_native(id(&session_id)?, api_id, secret)
+        .session_info(session_id)
+        .await?
+        .api_configured
+    {
+        return Ok(runtime.backend.reconnect(session_id).await?.into());
+    }
+    let (api_id, secret) = crate::credentials::telegram()?;
+    Ok(runtime
+        .backend
+        .connect_native(session_id, api_id, secret)
         .await?
         .into())
 }

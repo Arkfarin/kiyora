@@ -5,6 +5,40 @@ The verified artifact is a **debug development bundle**, not a release package.
 
 ## Reproduced build
 
+### Private Telegram application configuration
+
+Flutter onboarding uses the application's bundled Telegram configuration. Users
+enter only their account authentication details (phone/QR, code, optional 2FA).
+The Flutter bridge accepts no application ID/hash and exposes no getter for them.
+Existing profiles reconnect using their original OS-protected configuration.
+
+Before building, provision a private JSON file outside the checkout, containing
+`api_id` (positive integer) and `api_hash` (32 hexadecimal characters). Set
+`KIYORA_TELEGRAM_CONFIG` to its absolute path, or use
+`$XDG_CONFIG_HOME/kiyora-build/telegram.json` (default
+`$HOME/.config/kiyora-build/telegram.json`). On Unix the file must have mode `0600`.
+Supply CI configuration through a secret file, never command-line credential
+values, Dart defines, source files, or Flutter assets.
+
+Cargo embeds validated bytes in the native library. Changes to the file trigger
+recompilation. An invalid, insecure or explicitly missing file fails the build
+without printing its contents. Release builds require configuration; debug builds
+without a file support offline development and show a configuration error when
+login is requested. The private file is not required on end-user devices.
+
+The binary necessarily contains recoverable application credentials. Keeping
+them out of Git, Dart and logs prevents accidental disclosure, but does not make
+a distributed desktop application's credentials secret from its recipient.
+Treat the native binaries and build caches accordingly. Session/database keys
+continue to use the existing OS-backed secret storage.
+
+Linux needs an available, unlocked Secret Service provider, such as KDE's
+KWallet/KSecretD or GNOME Keyring. KIYORA does not select or replace the user's
+provider. KDE documents its Secret Service backend in the
+[KWallet README](https://github.com/KDE/kwallet/blob/master/README.md).
+
+### Development bundle
+
 Host: CachyOS x86_64; Flutter 3.50.0; FRB 2.13.0; repository Cargo.lock and
 Flutter pubspec.lock. Flutter, Rust/Cargo, CMake, Ninja, a C++ toolchain, pkg-config,
 GTK3, ALSA and D-Bus development libraries are required.
