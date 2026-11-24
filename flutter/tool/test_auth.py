@@ -34,9 +34,16 @@ def main():
             "gnome-keyring-daemon", "--start", "--components=secrets",
             "--control-directory", str(isolated / "keyring-control"),
         ], stdout=subprocess.DEVNULL, check=True, timeout=15)
-        subprocess.run([
-            "flutter", "test", "--no-pub", "test_native/auth_test.dart",
-        ], cwd=root / "flutter", check=True, timeout=90)
+        for phase in ("seed", "unavailable", "restore"):
+            print(f"Native authentication phase: {phase}", flush=True)
+            env = dict(os.environ, KIYORA_NATIVE_TEST_PHASE=phase)
+            if phase == "unavailable":
+                # Simulate an unavailable provider for this process only. Keep
+                # the private keyring alive so restore proves no data was lost.
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={isolated}/missing-bus"
+            subprocess.run([
+                "flutter", "test", "--no-pub", "test_native/auth_test.dart",
+            ], cwd=root / "flutter", env=env, check=True, timeout=90)
         return
     tdjson = Path(os.environ.get("KIYORA_TDJSON",
                   root / "src-tauri/target/native/desktop/native/libtdjson.so")).resolve()
@@ -69,7 +76,7 @@ def main():
         subprocess.run([
             "dbus-run-session", "--", sys.executable, str(Path(__file__).resolve()),
             "--isolated-child",
-        ], env=env, check=True, timeout=110)
+        ], env=env, check=True, timeout=290)
 
 
 if __name__ == "__main__":

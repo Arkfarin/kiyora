@@ -99,6 +99,12 @@ the test never supplies a phone number, code, password or QR account approval.
 TDLib may access the network. Reaching phone entry does not prove successful
 account authentication or Telegram's acceptance of the application credentials.
 
+The runner also passed three independent process phases: first connection,
+restart with an unavailable Secret Service bus, and restart with the service
+restored. The unavailable phase returns `SecureStorageUnavailable` without
+discarding the saved profile or application configuration. The final process
+restores the same active profile and reaches phone entry using its saved secrets.
+
 GNOME Keyring is a provider used by this test harness, not a runtime dependency
 of KIYORA. The application uses the Secret Service API. KWallet's Secret Service
 provider is compatible with that interface; a live KWallet-specific acceptance
