@@ -1,12 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "design-taste-frontend": {
-      "source": "Leonxlnx/taste-skill",
-      "sourceType": "github",
-      "skillPath": "skills/taste-skill/SKILL.md",
-      "computedHash": "6ac8ba6089dcbc303744a507a4587113c5d845ca2f658b3ce2b0b5eab108fb0d"
-    },
     "proptest-testing": {
       "source": "testland/qa",
       "sourceType": "github",
@@ -24,24 +18,6 @@
       "sourceType": "github",
       "skillPath": "skills/rust-testing/SKILL.md",
       "computedHash": "bd66d6441ff6d3a6acb89c902cd6a01bf58410aec3ecbc43d45409b3a3788ac8"
-    },
-    "tauri-ipc": {
-      "source": "full-stack-skills/tauri-skills",
-      "sourceType": "github",
-      "skillPath": "skills/tauri-ipc/SKILL.md",
-      "computedHash": "1de5fcef985c56df5bcd21e147281d34211dc061ca7e17b171900fd7573a4243"
-    },
-    "tauri-mobile": {
-      "source": "full-stack-skills/tauri-skills",
-      "sourceType": "github",
-      "skillPath": "skills/tauri-mobile/SKILL.md",
-      "computedHash": "3a1da42b47ca117962469a8327e3fe03a3c5dacaa9395f6ddbaf5a174dee7aad"
-    },
-    "tauri-security": {
-      "source": "full-stack-skills/tauri-skills",
-      "sourceType": "github",
-      "skillPath": "skills/tauri-security/SKILL.md",
-      "computedHash": "ae6038bc9ddf61328e85928143318c463b12644012091fc5f7f2d91211a7bb06"
     }
   }
 }
