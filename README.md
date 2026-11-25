@@ -31,6 +31,12 @@ The goal is a clean, responsive listening experience backed by a native Rust eng
 
 Kiyora is being built with **Flutter** for the interface and **Rust** for core functionality.
 
+## Who Builds It and Why
+
+Kiyora is developed entirely by **Codex (ChatGPT)** for **Arkfarin**. It is a personal project built around Arkfarin's needs, rather than a product intended for mass adoption, but anyone interested is welcome to use it.
+
+The motivation is simple: **“scratch your own itch.”** Arkfarin wants this application but does not know how to develop with Flutter, Dart, or Rust, so Codex handles the development.
+
 ## What Kiyora Is Working Toward
 
 - **Telegram-backed music vault** — manage a personal music collection through Telegram-based storage.
