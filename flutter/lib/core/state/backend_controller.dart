@@ -10,6 +10,10 @@ import '../bridge/generated/api/vault.dart' as vault;
 
 /// Process-owned projection of Rust state. Widgets only attach listeners.
 class BackendController extends ChangeNotifier {
+  BackendController() {
+    libraryRevision.addListener(_refreshCurrentTrack);
+  }
+
   api.Session? session;
   List<api.Profile> profiles = [];
   auth.Authorization? authorization;
@@ -27,6 +31,7 @@ class BackendController extends ChangeNotifier {
   api.EventFeed? _feed;
   auth.Operation? _operation;
   int _epoch = 0;
+  int _trackRequest = 0;
   bool _closing = false;
   Future<void>? _starting;
   Future<void>? _switching;
@@ -108,6 +113,7 @@ class BackendController extends ChangeNotifier {
   }
 
   void _clearSession() {
+    _trackRequest++;
     authorization = null;
     details = null;
     runtime = null;
@@ -205,7 +211,6 @@ class BackendController extends ChangeNotifier {
     libraryRevision.value++;
     jobRevision.value++;
     notifyListeners();
-    unawaited(_loadCurrentTrack(epoch));
     return watermark;
   }
 
@@ -226,10 +231,7 @@ class BackendController extends ChangeNotifier {
         if (sequence != null) watermark = sequence;
         switch (event.change) {
           case api.Change_Playback(:final state):
-            final oldTrack = playbackTrackId(playback.value);
-            playback.value = state;
-            if (oldTrack != playbackTrackId(state))
-              unawaited(_loadCurrentTrack(epoch));
+            _setPlayback(state);
           case api.Change_Queue(:final state):
             queue.value = state;
           case api.Change_Runtime(:final state):
@@ -297,16 +299,32 @@ class BackendController extends ChangeNotifier {
     }
   }
 
+  void _setPlayback(api.Playback state) {
+    final oldTrack = playbackTrackId(playback.value);
+    playback.value = state;
+    if (oldTrack != playbackTrackId(state)) _refreshCurrentTrack();
+  }
+
+  void _refreshCurrentTrack() {
+    if (!_closing) unawaited(_loadCurrentTrack(_epoch));
+  }
+
   Future<void> _loadCurrentTrack(int epoch) async {
+    final request = ++_trackRequest;
     final trackId = playbackTrackId(playback.value);
-    currentTrack.value = null;
+    // Keep the current artwork visible while refreshing its metadata.
+    if (currentTrack.value?.id != trackId) currentTrack.value = null;
     if (trackId == null || session == null) return;
+    bool isCurrent() =>
+        !_closing &&
+        epoch == _epoch &&
+        request == _trackRequest &&
+        playbackTrackId(playback.value) == trackId;
     try {
       final track = await content.track(sessionId: sessionId, trackId: trackId);
-      if (epoch == _epoch && playbackTrackId(playback.value) == trackId)
-        currentTrack.value = track;
+      if (isCurrent()) currentTrack.value = track;
     } catch (e) {
-      if (epoch == _epoch) {
+      if (isCurrent()) {
         error = e;
         notifyListeners();
       }
@@ -351,7 +369,7 @@ class BackendController extends ChangeNotifier {
   Future<void> transport(api.Transport command) => action(() async {
     final epoch = _epoch;
     final state = await api.control(sessionId: sessionId, action: command);
-    if (epoch == _epoch) playback.value = state;
+    if (epoch == _epoch) _setPlayback(state);
   });
   Future<void> togglePlayback() => transport(
     playback.value is api.Playback_Playing

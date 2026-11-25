@@ -1,7 +1,9 @@
 import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kiyora/core/bridge/generated/api.dart' as api;
 import 'package:kiyora/core/bridge/generated/api/auth.dart' as auth;
+import 'package:kiyora/core/bridge/generated/api/content.dart' as content;
 import 'package:kiyora/core/bridge/generated/api/vault.dart' as vault;
 import 'package:kiyora/core/bridge/generated/frb_generated.dart';
 import 'package:kiyora/core/state/backend_controller.dart';
@@ -74,6 +76,22 @@ class TestApi extends RustLibApi {
   Completer<api.Playback>? playbackRead;
   api.Playback playbackState = const api.Playback.idle();
   String sequence = '0';
+  final trackReads = <(String, Completer<content.TrackDetail?>)>[];
+  @override
+  Future<content.TrackDetail?> crateApiContentTrack({
+    required String sessionId,
+    required String trackId,
+  }) {
+    final pending = Completer<content.TrackDetail?>();
+    trackReads.add((trackId, pending));
+    return pending.future;
+  }
+
+  @override
+  Future<api.Playback> crateApiControl({
+    required String sessionId,
+    required api.Transport action,
+  }) async => playbackState;
   @override
   Future<vault.Status> crateApiVaultStatus() async =>
       vault.Status(session: session, mode: runtimeMode);
@@ -226,6 +244,55 @@ void main() {
     expect(controller.runtime?.mode, vault.Mode.degradedReadonly);
   });
 
+  testWidgets('late A read cannot overwrite metadata after A to B to A', (
+    tester,
+  ) async {
+    await controller.start();
+    for (final id in ['a', 'b', 'a']) {
+      native.playbackState = api.Playback.ended(trackId: id);
+      await controller.transport(const api.Transport.next());
+    }
+    expect(native.trackReads.map((read) => read.$1), ['a', 'b', 'a']);
+    final latest = trackDetail('a', 'Updated title');
+    native.trackReads[2].$2.complete(latest);
+    await tester.pump();
+    native.trackReads[0].$2.complete(trackDetail('a', 'Old title'));
+    native.trackReads[1].$2.completeError(StateError('stale read failed'));
+    await tester.pump();
+    expect(controller.currentTrack.value, latest);
+    expect(controller.error, isNull);
+  });
+
+  testWidgets(
+    'library changes refresh playing metadata without clearing artwork',
+    (tester) async {
+      await controller.start();
+      native.playbackState = const api.Playback.ended(trackId: 'a');
+      await controller.transport(const api.Transport.next());
+      final before = trackDetail('a', 'Before edit');
+      native.trackReads.single.$2.complete(before);
+      await tester.pump();
+      controller.libraryRevision.value++;
+      expect(controller.currentTrack.value, before);
+      final after = trackDetail('a', 'After edit');
+      native.trackReads.last.$2.complete(after);
+      await tester.pump();
+      expect(controller.currentTrack.value, after);
+    },
+  );
+
+  testWidgets('track read after shutdown cannot restore cleared metadata', (
+    tester,
+  ) async {
+    await controller.start();
+    native.playbackState = const api.Playback.ended(trackId: 'a');
+    await controller.transport(const api.Transport.next());
+    await controller.close();
+    native.trackReads.single.$2.complete(trackDetail('a', 'Late result'));
+    await tester.pump();
+    expect(controller.currentTrack.value, isNull);
+  });
+
   testWidgets('manual refresh supersedes a pending automatic reconnect', (
     tester,
   ) async {
@@ -359,3 +426,25 @@ void main() {
     expect(native.operation.cancelled, isTrue);
   });
 }
+
+content.TrackDetail trackDetail(String id, String title) => content.TrackDetail(
+  id: id,
+  revision: '1',
+  metadata: content.Metadata(
+    title: title,
+    artist: '',
+    album: '',
+    albumArtist: '',
+    durationMs: BigInt.zero,
+    year: 0,
+    genre: '',
+    trackNumber: 0,
+    discNumber: 0,
+    bitrate: 0,
+    codec: '',
+    composer: '',
+    comment: '',
+    copyright: '',
+  ),
+  sources: [],
+);
