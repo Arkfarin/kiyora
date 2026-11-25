@@ -52,7 +52,7 @@ def main():
         return
     tdjson = (args.bundle / "native/libtdjson.so" if args.bundle else
               Path(os.environ.get("KIYORA_TDJSON",
-                  root / "src-tauri/target/native/desktop/native/libtdjson.so"))).resolve()
+                  root / "rust/target/native/desktop/native/libtdjson.so"))).resolve()
     if not tdjson.is_file():
         raise SystemExit("Build pinned TDLib first or set KIYORA_TDJSON")
     if args.bundle:
@@ -62,10 +62,10 @@ def main():
     else:
         subprocess.run([
             "cargo", "build", "--locked", "-p", "kiyora-flutter-bridge",
-        ], cwd=root / "src-tauri", check=True)
+        ], cwd=root / "rust", check=True)
         metadata = json.loads(subprocess.check_output([
             "cargo", "metadata", "--no-deps", "--format-version=1",
-        ], cwd=root / "src-tauri"))
+        ], cwd=root / "rust"))
         library = Path(metadata["target_directory"]) / "debug/libkiyora_flutter_bridge.so"
     with tempfile.TemporaryDirectory(prefix="kiyora-auth-test-") as temporary:
         isolated = Path(temporary)

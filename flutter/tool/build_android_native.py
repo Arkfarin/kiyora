@@ -10,7 +10,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument('--abis', default='arm64-v8a')
 args = parser.parse_args()
-root = Path(__file__).resolve().parents[2] / 'src-tauri'
+root = Path(__file__).resolve().parents[2] / 'rust'
 ndk_value = os.environ.get('ANDROID_NDK_HOME') or os.environ.get('NDK_HOME')
 if not ndk_value:
     sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
@@ -31,7 +31,7 @@ for abi in args.abis.split(','):
     if abi not in targets:
         raise SystemExit(f'Unsupported Android ABI: {abi}')
     if not (root / 'target/native/android-jni' / abi / 'libtdjson.so').is_file():
-        raise SystemExit(f'Prepare TDLib first: KIYORA_ANDROID_ABI={abi} bash src-tauri/scripts/prepare-android-native.sh')
+        raise SystemExit(f'Prepare TDLib first: KIYORA_ANDROID_ABI={abi} bash rust/scripts/prepare-android-native.sh')
     triple = targets[abi]
     key = triple.replace('-', '_')
     compiler = bin_dir / f'{triple}26-clang'

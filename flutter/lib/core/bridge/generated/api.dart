@@ -16,8 +16,8 @@ part 'api.freezed.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Runtime`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
 
-/// Desktop initialization uses the exact same ProfileStore and OS keyring as
-/// Tauri. Android must install its native storage/media adapters first.
+/// Desktop initialization uses the shared ProfileStore and OS keyring.
+/// Android must install its native storage/media adapters first.
 Future<Session?> initialize({String? resources, BigInt? windowHandle}) =>
     RustLib.instance.api.crateApiInitialize(
       resources: resources,

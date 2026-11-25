@@ -69,7 +69,7 @@ Platform support and release timing are not guaranteed. A working source tree do
 
 Kiyora is currently a development project, not a finished application with a supported installation process.
 
-The Flutter application is located in [`flutter/`](flutter/). Native integration, generated bindings, and platform-specific dependencies may be required to build and run it.
+The Flutter application is located in [`flutter/`](flutter/). The native Cargo workspace is in [`rust/`](rust/); build and test scripts use that directory. Native integration, generated bindings, and platform-specific dependencies may be required to build and run it.
 
 For technical context, see the [Flutter migration notes](docs/FLUTTER_LINUX_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_LINUX_RELEASE.md). Verification scope and remaining checks are recorded in the [Linux testing notes](docs/FLUTTER_LINUX_TESTING.md).
 

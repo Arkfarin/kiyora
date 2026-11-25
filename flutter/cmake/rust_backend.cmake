@@ -1,7 +1,7 @@
 # The native library is built as part of the Flutter build, never copied from a
 # developer-specific installation. It links the existing Rust workspace only.
 find_program(KIYORA_CARGO cargo REQUIRED)
-get_filename_component(KIYORA_WORKSPACE "${CMAKE_CURRENT_LIST_DIR}/../../src-tauri" ABSOLUTE)
+get_filename_component(KIYORA_WORKSPACE "${CMAKE_CURRENT_LIST_DIR}/../../rust" ABSOLUTE)
 set(KIYORA_CARGO_TARGET "${KIYORA_WORKSPACE}/target")
 set(KIYORA_RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(KIYORA_RELEASE_FLAG "$<$<NOT:$<CONFIG:Debug>>:--release>")

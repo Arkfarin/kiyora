@@ -11,9 +11,9 @@ def main():
     root = Path(__file__).resolve().parents[2]
     subprocess.run([
         "cargo", "build", "--locked", "--manifest-path",
-        str(root / "src-tauri/Cargo.toml"), "-p", "kiyora-flutter-bridge",
+        str(root / "rust/Cargo.toml"), "-p", "kiyora-flutter-bridge",
     ], check=True)
-    target = Path(os.environ.get("CARGO_TARGET_DIR", root / "src-tauri/target"))
+    target = Path(os.environ.get("CARGO_TARGET_DIR", root / "rust/target"))
     script = max(
         (target / "debug/build").glob("kiyora-flutter-bridge-*/build-script-build"),
         key=lambda p: p.stat().st_mtime,

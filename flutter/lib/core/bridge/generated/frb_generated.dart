@@ -80,7 +80,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
       ExternalLibraryLoaderConfig(
         stem: 'kiyora_flutter_bridge',
         ioDirectory:
-            '../src-tauri/crates/kiyora-flutter-bridge/target/release/',
+            '../rust/crates/kiyora-flutter-bridge/target/release/',
         webPrefix: 'pkg/',
         wasmBindgenName: 'wasm_bindgen',
       );

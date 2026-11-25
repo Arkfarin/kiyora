@@ -10,7 +10,7 @@ plans in the historical migration notes are superseded by this scope.
 Flutter widgets / MusicNavigation
   -> BackendController, bounded PagedQuery, typed feature API calls
   -> generated flutter_rust_bridge 2.13.0 bindings
-  -> kiyora-flutter-bridge (no Tauri dependency)
+  -> kiyora-flutter-bridge (native library)
   -> vault-core::Backend
      -> vault-telegram / TDLib
      -> vault-sync, vault-snapshot, vault-db / SQLite
@@ -26,7 +26,7 @@ current-track and collection invalidations. Rust remains authoritative for
 queue revisions, playback, jobs and durable mutations. Dart holds UI history and
 projections, not another audio engine or Telegram client.
 
-The native boundary is `src-tauri/crates/kiyora-flutter-bridge/src/api/`:
+The native boundary is `rust/crates/kiyora-flutter-bridge/src/api/`:
 `mod.rs` covers lifecycle/profiles/playback/queue/events; `auth`, `vault`,
 `content`, `edits`, `imports`, `jobs`, and `offline` expose typed DTOs and errors.
 Generated files are committed. `flutter/tool/generate.sh` pins FRB generator
@@ -55,13 +55,13 @@ regression and native test evidence is in [testing](FLUTTER_LINUX_TESTING.md).
 ## Existing data and compatibility
 
 Desktop initialization uses the same `ProfileStore` and native resolution as the
-Tauri client. `KIYORA_DATA_DIR` explicitly selects a data root; without it the
+previous client. `KIYORA_DATA_DIR` explicitly selects a data root; without it the
 existing platform data-location constructor is used. OS-protected secrets stay in
 the existing keyring. This increment changes no schema, storage protocol, profile
 IDs, Telegram sessions or cache layout. It does not delete or migrate user files.
 
-Close the old client before opening the same profile. The old React/Tauri client
-is retained as a fallback. A real Tauri-profile upgrade, offline cache compatibility
+Close other clients before opening the same profile. Flutter is the sole UI in
+this repository. An existing-profile upgrade, offline cache compatibility
 and interrupted-sync recovery must still be tested on backed-up representative
 data before migration is accepted. Native tests only create disposable profiles.
 

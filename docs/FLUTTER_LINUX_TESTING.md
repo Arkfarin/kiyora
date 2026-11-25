@@ -15,7 +15,7 @@ flutter test --no-pub
 flutter analyze --no-pub
 ```
 
-From `src-tauri/`:
+From `rust/`:
 
 ```sh
 cargo test --locked -p kiyora-flutter-bridge
@@ -122,11 +122,6 @@ normally on Umbriel Wayland and XWayland. The package ran outside the repository
 from a path containing spaces. See the release document for artifact identity,
 commands, glibc observations and unverified installation/compatibility limits.
 
-The historical `FLUTTER_MIGRATION.md` and `FLUTTER_RELEASE_READINESS.md` describe
-an earlier source-only stage and contain stale no-testing and cross-platform
-plans. The current Linux-first task requires testing. Do not treat those older
-statements as current acceptance evidence or instructions to skip verification.
-
 ## Native offline playback and MPRIS regression
 
 `python3 flutter/tool/test_playback.py` passed on CachyOS with PipeWire 1.6.11's
@@ -143,5 +138,5 @@ sink, not listening through physical speakers. Telegram is never contacted.
 
 This test reproduced a >10-second stall in souvlaki's D-Bus detach behind queued
 status updates. The local dependency patch is documented in
-`src-tauri/vendor/souvlaki/KIYORA-PATCH.md`. With the bounded dispatcher and
+`rust/vendor/souvlaki/KIYORA-PATCH.md`. With the bounded dispatcher and
 prioritized shutdown the scenario passed in about two seconds.

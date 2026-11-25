@@ -45,7 +45,7 @@ def main():
         if not os.access(bundle / "kiyora", os.X_OK):
             raise SystemExit("Packaged executable lost its execute permission")
         manifest = json.loads((bundle / "native/manifest.json").read_text())
-        pin = json.loads((root / "src-tauri/scripts/native-sources.json").read_text())["tdlib"]
+        pin = json.loads((root / "rust/scripts/native-sources.json").read_text())["tdlib"]
         if (manifest["platform"], manifest["tdlib_version"], manifest["tdlib_revision"]) != (
                 "linux-x86_64", pin["version"], pin["revision"]):
             raise SystemExit("Packaged TDLib identity differs from the reviewed pin")

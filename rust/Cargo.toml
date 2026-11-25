@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["vendor/souvlaki"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = { version = "0.8.22", features = ["uuid1"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+proptest = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs", "io-util", "test-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "json", "registry", "std"] }
+vault-domain = { path = "crates/vault-domain" }
+vault-protocol = { path = "crates/vault-protocol" }
+vault-db = { path = "crates/vault-db" }
+vault-telegram = { path = "crates/vault-telegram" }
+vault-security = { path = "crates/vault-security" }
+vault-testkit = { path = "crates/vault-testkit" }
+vault-snapshot = { path = "crates/vault-snapshot" }
+vault-sync = { path = "crates/vault-sync" }
+vault-core = { path = "crates/vault-core" }
+vault-media = { path = "crates/vault-media" }
+rpassword = "7"
+zstd = "0.13"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# Linux MPRIS: bound dispatch and prioritize shutdown; see vendor patch notes.
+[patch.crates-io]
+souvlaki = { path = "vendor/souvlaki" }

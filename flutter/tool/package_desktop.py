@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a Flutter desktop bundle with the repository's pinned native sources.
 
-No Tauri frontend, device execution, test command, signing or publication.
+No device execution, test command, signing or publication.
 """
 import argparse
 import hashlib
@@ -15,7 +15,7 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--deb', action='store_true', help='Create a Linux Debian installer')
 args = parser.parse_args()
 flutter_root = Path(__file__).resolve().parent.parent
-rust_root = flutter_root.parent / 'src-tauri'
+rust_root = flutter_root.parent / 'rust'
 windows = os.name == 'nt'
 platform = 'windows' if windows else 'linux'
 if not windows and os.uname().machine != 'x86_64':
@@ -43,9 +43,6 @@ if not windows:
     shutil.copytree(rust_root / 'licenses', bundle / 'licenses', dirs_exist_ok=True)
     shutil.copy2(rust_root / 'vendor/souvlaki/LICENSE', bundle / 'licenses/souvlaki-LICENSE')
     shutil.copy2(rust_root / 'vendor/souvlaki/KIYORA-PATCH.md', bundle / 'licenses/souvlaki-PATCH.md')
-for item in native.glob('*.json'):
-    if item.name != 'tauri-bundle.json':
-        shutil.copy2(item, bundle / item.name)
 library = bundle / 'native' / ('tdjson.dll' if windows else 'libtdjson.so')
 if not library.is_file():
     raise SystemExit('Native preparation did not produce TDLib')

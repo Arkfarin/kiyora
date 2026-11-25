@@ -22,7 +22,7 @@ def main():
     if not os.sys.platform.startswith('linux') or missing:
         raise SystemExit(f'Linux and these tools are required: {missing or required}')
     root = Path(__file__).resolve().parent.parent
-    rust = root.parent / 'src-tauri'
+    rust = root.parent / 'rust'
     subprocess.run(['cargo', 'build', '--locked', '-p', 'kiyora-flutter-bridge',
                     '--lib', '--example', 'seed_offline_fixture'], cwd=rust, check=True)
     metadata = json.loads(subprocess.check_output(

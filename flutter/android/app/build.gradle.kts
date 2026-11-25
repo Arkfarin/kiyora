@@ -65,14 +65,14 @@ android {
         }
     }
     sourceSets.getByName("main") {
-        jniLibs.srcDir(file("../../../src-tauri/target/native/flutter-jni"))
-        jniLibs.srcDir(file("../../../src-tauri/target/native/android-jni"))
-        assets.srcDir(file("../../../src-tauri/target/native/android-assets"))
+        jniLibs.srcDir(file("../../../rust/target/native/flutter-jni"))
+        jniLibs.srcDir(file("../../../rust/target/native/android-jni"))
+        assets.srcDir(file("../../../rust/target/native/android-assets"))
     }
     packaging.jniLibs.useLegacyPackaging = true
     buildTypes {
         release {
-            // Same private signing infrastructure as the installed Tauri client.
+            // Keep the existing application signing identity.
             // Without it the output is unsigned; never silently use a debug key.
             signingConfigs.findByName("release")?.let { signingConfig = it }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -90,17 +90,8 @@ flutter {
     source = "../.."
 }
 
-// Compile the same OS adapters as Tauri, excluding its transport-specific plugin.
-val sharedNative = tasks.register<Sync>("syncSharedNative") {
-    from(file("../../../src-tauri/crates/tauri-plugin-kiyora-native/android/src/main/java/io/github/arkfarin/kiyora/nativebridge")) {
-        include("KeystoreSecrets.kt", "DocumentImports.kt", "NativePlayback.kt", "PlaybackService.kt")
-    }
-    into(layout.buildDirectory.dir("generated/kiyoraNative"))
-}
-kotlin.sourceSets.getByName("main").kotlin.srcDir(sharedNative)
-
 val buildRustBackend = tasks.register<Exec>("buildRustBackend") {
     workingDir(file("../../.."))
     commandLine("python3", "flutter/tool/build_android_native.py", "--abis", nativeAbis.joinToString(","))
 }
-tasks.named("preBuild") { dependsOn(buildRustBackend, sharedNative) }
+tasks.named("preBuild") { dependsOn(buildRustBackend) }
