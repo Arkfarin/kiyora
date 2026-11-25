@@ -1,7 +1,9 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+
 import '../core/bridge/generated/api/edits.dart' as edits;
 import '../core/routing/navigation.dart';
 import '../core/state/backend_controller.dart';
@@ -9,6 +11,7 @@ import '../core/theme/kiyora_theme.dart';
 import '../core/widgets/artwork.dart';
 import '../features/home/home_view.dart';
 import '../features/imports/import_view.dart';
+import '../features/imports/import_selection.dart';
 import '../features/library/library_view.dart';
 import '../features/library/track_actions.dart';
 import '../features/lyrics/lyrics_view.dart';
@@ -44,9 +47,11 @@ class _MusicShellState extends State<MusicShell> {
   Timer? _searchDelay;
   String _query = '';
   BackendController get b => widget.backend;
+  late final ImportSelection _imports;
   @override
   void initState() {
     super.initState();
+    _imports = ImportSelection(b);
     b.commandResults.addListener(_command);
     b.addListener(_error);
   }
@@ -54,9 +59,8 @@ class _MusicShellState extends State<MusicShell> {
   void _command() {
     final command = b.commandResults.value;
     if (command == null || !mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(commandMessage(command))));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(commandMessage(command))));
     if (command.state == edits.CommandState.applied) b.libraryRevision.value++;
   }
 
@@ -78,6 +82,7 @@ class _MusicShellState extends State<MusicShell> {
     b.commandResults.removeListener(_command);
     b.removeListener(_error);
     _navigation.dispose();
+    _imports.dispose();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -196,7 +201,11 @@ class _MusicShellState extends State<MusicShell> {
         backend: b,
         navigation: _navigation,
       ),
-      Destination.imports => ImportView(key: key, backend: b),
+      Destination.imports => ImportView(
+        key: key,
+        backend: b,
+        selection: _imports,
+      ),
       Destination.settings => SettingsView(
         key: key,
         backend: b,

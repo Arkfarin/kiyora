@@ -1,13 +1,15 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/jobs.dart' as jobs;
-import '../../core/bridge/generated/api.dart' as api;
 import '../../core/state/backend_controller.dart';
 import '../library/track_actions.dart';
+import 'import_selection.dart';
 
 class ImportView extends StatefulWidget {
-  const ImportView({super.key, required this.backend});
+  const ImportView({super.key, required this.backend, this.selection});
   final BackendController backend;
+  final ImportSelection? selection;
   @override
   State<ImportView> createState() => _ImportViewState();
 }
@@ -15,12 +17,12 @@ class ImportView extends StatefulWidget {
 class _ImportViewState extends State<ImportView> {
   late Future<List<jobs.Job>> _jobs;
   bool _selecting = false;
-  List<jobs.ImportFile> _pending = [];
-  String? _jobId;
+  late final ImportSelection _selection;
   BackendController get b => widget.backend;
   @override
   void initState() {
     super.initState();
+    _selection = widget.selection ?? ImportSelection(b);
     _refresh();
     b.jobRevision.addListener(_refresh);
   }
@@ -28,6 +30,7 @@ class _ImportViewState extends State<ImportView> {
   @override
   void dispose() {
     b.jobRevision.removeListener(_refresh);
+    if (widget.selection == null) _selection.dispose();
     super.dispose();
   }
 
@@ -61,23 +64,7 @@ class _ImportViewState extends State<ImportView> {
         ],
       );
       if (files.isEmpty || !mounted) return;
-      final pending = <jobs.ImportFile>[];
-      for (final file in files) {
-        pending.add(
-          jobs.ImportFile(
-            path: file.path,
-            trackId: await api.newOperationId(),
-            sourceId: await api.newOperationId(),
-            operationId: await api.newOperationId(),
-            allowDuplicate: false,
-          ),
-        );
-      }
-      if (mounted)
-        setState(() {
-          _pending = pending;
-          _jobId = null;
-        });
+      await _selection.select(files.map((file) => file.path).toList());
     } catch (e) {
       await b.action(() async {
         throw e;
@@ -87,32 +74,9 @@ class _ImportViewState extends State<ImportView> {
     }
   }
 
-  Future<void> _send() async {
-    if (_pending.isEmpty) return;
-    await b.action(() async {
-      // The backend accepts 1000 per durable job. Every file is retained and
-      // submitted in explicit batches; never truncate a user's selection.
-      while (_pending.isNotEmpty) {
-        final batch = _pending.take(1000).toList();
-        _jobId ??= await api.newOperationId();
-        await jobs.importFiles(
-          sessionId: b.sessionId,
-          jobId: _jobId!,
-          files: batch,
-        );
-        if (!mounted) return;
-        setState(() {
-          _pending = _pending.sublist(batch.length);
-          _jobId = null;
-        });
-        _refresh();
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: b,
+    listenable: Listenable.merge([b, _selection]),
     builder: (context, _) => CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
@@ -123,9 +87,8 @@ class _ImportViewState extends State<ImportView> {
               children: [
                 Text(
                   'Добавьте свою музыку',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(context).textTheme.headlineMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -133,29 +96,29 @@ class _ImportViewState extends State<ImportView> {
                 ),
                 const SizedBox(height: 24),
                 FilledButton.icon(
-                  onPressed: _selecting || b.busy || _pending.isNotEmpty
+                  onPressed: _selecting || b.busy || _selection.files.isNotEmpty
                       ? null
                       : _pick,
                   icon: const Icon(Icons.audio_file_outlined),
                   label: const Text('Выбрать файлы'),
                 ),
                 if (_selecting) const LinearProgressIndicator(),
-                if (_pending.isNotEmpty) ...[
+                if (_selection.files.isNotEmpty) ...[
                   const SizedBox(height: 20),
-                  Text('Выбрано файлов: ${_pending.length}'),
+                  Text('Выбрано файлов: ${_selection.files.length}'),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: b.busy ? null : _send,
+                    onPressed: b.busy ? null : _selection.send,
                     child: Text(
-                      _jobId == null
+                      !_selection.retrying
                           ? 'Отправить как есть'
                           : 'Продолжить отправку',
                     ),
                   ),
                   TextButton(
-                    onPressed: b.busy || _jobId != null
+                    onPressed: b.busy || _selection.retrying
                         ? null
-                        : () => setState(() => _pending = []),
+                        : _selection.clear,
                     child: const Text('Отменить выбор'),
                   ),
                 ],
