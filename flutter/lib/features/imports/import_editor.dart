@@ -211,6 +211,17 @@ class ImportEditor extends StatelessWidget {
                   ? 'Встроенного текста нет'
                   : 'Встроенный текст: ${preview!.lyrics!.lines.length} строк',
             ),
+          if (!draft.replaceLyrics &&
+              !draft.clearLyrics &&
+              preview?.lyrics != null)
+            Text(
+              preview!.lyrics!.lines
+                  .take(6)
+                  .map((line) => line.text)
+                  .join('\n'),
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+            ),
           TextButton.icon(
             onPressed: editable ? _lyrics : null,
             icon: const Icon(Icons.upload_file),

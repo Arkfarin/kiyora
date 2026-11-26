@@ -22,6 +22,8 @@ class EditorApi extends ImportApi {
   final staged = <String, imports.Preview>{};
   final committed = <String>[];
   int parses = 0;
+  int artworkChecks = 0;
+  bool failArtwork = false;
   int discarded = 0;
   bool failCommit = false;
   bool failPreview = false;
@@ -86,6 +88,19 @@ class EditorApi extends ImportApi {
   }) async {
     discarded++;
     staged.remove(previewId);
+  }
+
+  @override
+  Future<content.Artwork> crateApiContentPrepareArtwork({
+    required List<int> bytes,
+  }) async {
+    artworkChecks++;
+    if (failArtwork) throw const FormatException('invalid artwork');
+    return content.Artwork(
+      mimeType: 'image/png',
+      digest: 'test',
+      bytes: Uint8List.fromList(bytes),
+    );
   }
 
   @override
@@ -226,6 +241,7 @@ void main() {
     await selection.submit(restored);
     expect(native.committed[1], native.committed[0]);
     expect(native.parses, 1);
+    expect(native.artworkChecks, 1);
     expect(restored.applied, isTrue);
   });
 
@@ -297,6 +313,29 @@ void main() {
       expect(draft.artwork, [1, 2, 3]);
     },
   );
+
+  test('invalid artwork keeps the previous cover and leaves restored drafts editable', () async {
+    final draft = await prepare();
+    await selection.loadArtwork(draft, () async => Uint8List.fromList([1, 2]));
+    native.failArtwork = true;
+    await selection.loadArtwork(draft, () async => Uint8List.fromList([3]));
+    expect(draft.artwork, [1, 2]);
+    // A pre-existing recovery file may contain artwork never checked by this UI.
+    selection.update(draft, (d) => d.artwork = Uint8List.fromList([4]));
+    await selection.saveDrafts();
+    selection.dispose();
+    selection = ImportSelection(backend, store: store);
+    await selection.restore();
+    await selection.submit(selection.drafts.single);
+    expect(selection.drafts.single.locked, isFalse);
+    expect(native.committed, isEmpty);
+    selection.update(selection.drafts.single, (d) {
+      d.artwork = null;
+      d.clearArtwork = true;
+    });
+    await selection.submit(selection.drafts.single);
+    expect(selection.drafts.single.applied, isTrue);
+  });
 
   test('duplicate confirmation only changes allowDuplicate', () async {
     final draft = await prepare();

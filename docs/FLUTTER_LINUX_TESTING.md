@@ -154,3 +154,40 @@ preview_original_upload_and_logical_edit_roundtrip_through_snapshot` also
 passed (1 test). This uses real Rust service/storage/media code with a test
 Telegram transport. It does not prove an actual Telegram upload or file-picker
 interaction. The historical platform checks above were not rerun by this step.
+
+### Import recovery and attachment validation checkpoint
+
+The final Flutter unit/widget suite passed **55 tests**; analysis reported no
+issues. A targeted rerun also checks that artwork validation, like lyric parsing,
+is not repeated for a frozen retry request. Recovery-store tests cover reads
+waiting for another session's last save, serialized writes across instances,
+immutable queued snapshots and recovery after a failed write.
+
+`cargo test --locked --workspace` passed **228 tests**, with **2 ignored**:
+the explicitly configured audio-output test and opt-in real TDLib startup test.
+The new bridge unit test rejects corrupt and oversized artwork without a session.
+The modified handwritten Rust file passes rustfmt. Workspace-wide formatting
+remains non-clean in pre-existing query/reader code; FRB's generated formatting
+also differs from Rust 2024 import ordering. Those files were not reformatted
+as unrelated work.
+
+The FRB bindings were regenerated with `flutter/tool/generate.sh` using 2.13.0.
+Two **real native content tests** passed against the rebuilt bridge, without
+backend initialization, D-Bus or Telegram. They check PNG normalization and
+idempotence, typed errors for corrupt/oversized images, LRC/SRT/WebVTT timestamps,
+plain lines and invalid lyrics. Reproduce from `flutter/` after rebuilding:
+
+```sh
+CI=true KIYORA_NATIVE_LIBRARY="$(realpath ../rust/target/debug/libkiyora_flutter_bridge.so)" \
+  flutter test --no-pub test_native/import_content_test.dart
+```
+
+`CI=true flutter build linux --debug --no-pub` passed with the updated native
+API. No release was published. Real Telegram/Vault import, native picker use,
+MPRIS/media keys and manual release/UI acceptance were not tested by these checks.
+
+`CI=true PATH=... python3 flutter/tool/test_native.py` also passed both isolated
+process phases (`seed`, `restore`) against the rebuilt generated bridge. The
+private D-Bus was available in this run. This confirms the existing lifecycle,
+profile and queue-preference recovery checks after the API regeneration; TDLib
+was deliberately unavailable, so this is not authentication or MPRIS evidence.

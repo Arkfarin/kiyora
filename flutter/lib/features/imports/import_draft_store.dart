@@ -6,7 +6,11 @@ import 'dart:io';
 class ImportDraftStore {
   ImportDraftStore(this.file);
   final File file;
-  Future<void> _writes = Future.value();
+  // Session teardown can flush a draft while a new session opens this store.
+  // Share the queue by path so neither instance reads stale data or races the
+  // other's temporary-file rename. Entries disappear once the queue drains.
+  static final Map<String, Future<void>> _pending = {};
+  String get _key => file.absolute.path;
 
   factory ImportDraftStore.forProfile(String profile, String? vault) {
     final env = Platform.environment;
@@ -23,6 +27,7 @@ class ImportDraftStore {
   }
 
   Future<List<Map<String, dynamic>>> read() async {
+    await _pending[_key];
     if (!await file.exists()) return [];
     final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
     if (json['version'] != 1)
@@ -33,14 +38,19 @@ class ImportDraftStore {
   Future<void> write(List<Map<String, Object?>> drafts) {
     // Snapshot synchronously; subsequent edits cannot alter a queued save.
     final bytes = jsonEncode({'version': 1, 'drafts': drafts});
-    final next = _writes.then((_) async {
+    final key = _key;
+    final next = (_pending[key] ?? Future<void>.value()).then((_) async {
       await file.parent.create(recursive: true);
       final temporary = File('${file.path}.tmp');
       await temporary.writeAsString(bytes, flush: true);
       await temporary.rename(file.path);
     });
     // A failed save must be retryable, but the caller still observes the error.
-    _writes = next.catchError((Object _) {});
+    final settled = next.catchError((Object _) {});
+    _pending[key] = settled;
+    settled.then((_) {
+      if (identical(_pending[key], settled)) _pending.remove(key);
+    });
     return next;
   }
 }

@@ -127,3 +127,12 @@ Telegram API secrets and session files out of diagnostic reports.
 Removing a development bundle must only remove that bundle. Do not remove the
 existing application data root or keyring entries to reinstall or troubleshoot.
 No uninstaller or migration script has been verified here.
+
+## Import editor development checkpoint (2026-11-26)
+
+The prepared-import editor and artwork preflight API were built successfully with
+`CI=true flutter build linux --debug --no-pub` in the isolated
+`kiyora-import-stability` checkout. The development artifact is
+`flutter/build/linux/x64/debug/bundle/kiyora` in that checkout. This rebuild is
+not the historical release tar described above; no replacement release package
+was created or published. Runtime account/Vault and release acceptance remain open.

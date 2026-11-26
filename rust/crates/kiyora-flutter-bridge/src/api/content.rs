@@ -137,6 +137,20 @@ pub async fn lyrics(
         .await?
         .map(Into::into))
 }
+/// Validate and normalize a local cover before freezing an import request.
+/// This uses the same bounded decoder as metadata commits, without uploading.
+///
+/// # Errors
+/// Returns InvalidInput for corrupt, unsupported or oversized artwork.
+pub fn prepare_artwork(bytes: Vec<u8>) -> Result<Artwork, BridgeError> {
+    let artwork = vault_media::artwork(&bytes, None).map_err(ApiError::from)?;
+    Ok(Artwork {
+        mime_type: artwork.mime_type,
+        digest: artwork.sha256,
+        bytes: artwork.bytes,
+    })
+}
+
 /// Existing parser retains LRC/SRT/WebVTT timestamps and leaves plain text untimed.
 pub fn parse_lyrics(text: String, format: String) -> Result<Lyrics, BridgeError> {
     Ok(vault_media::parse_lyrics(&text, &format)
@@ -335,4 +349,20 @@ pub async fn track(
                 })
                 .collect(),
         }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artwork_preflight_rejects_corrupt_and_oversized_input_without_a_session() {
+        for bytes in [
+            Vec::new(),
+            b"not an image".to_vec(),
+            vec![0; 8 * 1024 * 1024 + 1],
+        ] {
+            assert_eq!(prepare_artwork(bytes).unwrap_err().code, "InvalidInput");
+        }
+    }
 }

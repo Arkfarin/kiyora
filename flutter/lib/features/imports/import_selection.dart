@@ -100,6 +100,7 @@ class ImportSelection extends ChangeNotifier {
         operationId: draft.id,
       );
       if (!_active) return;
+      if (draft.command != null) draft.review = null;
     }
     restored = true;
     await _save();
@@ -167,7 +168,9 @@ class ImportSelection extends ChangeNotifier {
     if (!_active || draft.locked || !_drafts.contains(draft)) return;
     final bytes = await read();
     if (bytes == null || !_active || draft.locked) return;
-    draft.artwork = bytes.asUnmodifiableView();
+    final artwork = await content.prepareArtwork(bytes: bytes);
+    if (!_active) return;
+    draft.artwork = artwork.bytes.asUnmodifiableView();
     draft.clearArtwork = false;
     await _save();
   });
@@ -239,6 +242,10 @@ class ImportSelection extends ChangeNotifier {
               format: draft.lyricsFormat,
             )
           : null;
+      // Validate restored/legacy drafts too, before persisting a frozen request.
+      final artwork = draft.artwork != null && !draft.clearArtwork
+          ? (await content.prepareArtwork(bytes: draft.artwork!)).bytes
+          : null;
       if (!_active) return;
       final edit = edits.MetadataEdit(
         title: f['title'],
@@ -252,7 +259,7 @@ class ImportSelection extends ChangeNotifier {
         composer: f['composer'],
         comment: f['comment'],
         copyright: f['copyright'],
-        artwork: draft.artwork,
+        artwork: artwork,
         clearArtwork: draft.clearArtwork,
         lyrics: lyrics,
         clearLyrics: draft.clearLyrics,

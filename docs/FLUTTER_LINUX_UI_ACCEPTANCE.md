@@ -61,3 +61,9 @@ ServerAck versus Applied, cancellation/retry and attachment controls at 400,
 Real file-picker interaction, Telegram upload and manual visual acceptance remain
 unverified. A backend-only preview without its local request is deliberately
 read-only and can only resume an existing journal; the UI does not invent IDs.
+
+Cover selection now validates through the real Rust artwork decoder before
+replacing the draft's image. Invalid saved artwork is also checked before the
+first submission, leaving the form editable on failure. Embedded lyrics show a
+bounded text excerpt. A command receipt supersedes an older duplicate-review
+prompt when checking import status.

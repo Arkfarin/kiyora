@@ -98,3 +98,10 @@ scoped to profile and Vault. The UI invokes preview/list/discard/commit/resume a
 command-status APIs; it does not create another backend staging store. Recovery
 runs when opening Import and can be retried explicitly. A failed durable save
 prevents submission. Ordinary unprepared file selections remain session-local.
+
+Artwork preflight now exposes `content.prepareArtwork`, a thin local call to
+`vault_media::artwork`. It validates/normalizes both newly selected covers and
+unsubmitted restored drafts before freezing a request, without uploading or
+changing the storage protocol. Frozen retries bypass preflight and retain the
+original bytes. Recovery-file writes are serialized by path across store
+instances so a rapidly reopened profile waits for the preceding session's save.

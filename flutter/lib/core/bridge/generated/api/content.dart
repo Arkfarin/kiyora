@@ -75,6 +75,14 @@ Future<Lyrics?> lyrics({
   operation: operation,
 );
 
+/// Validate and normalize a local cover before freezing an import request.
+/// This uses the same bounded decoder as metadata commits, without uploading.
+///
+/// # Errors
+/// Returns InvalidInput for corrupt, unsupported or oversized artwork.
+Future<Artwork> prepareArtwork({required List<int> bytes}) =>
+    RustLib.instance.api.crateApiContentPrepareArtwork(bytes: bytes);
+
 /// Existing parser retains LRC/SRT/WebVTT timestamps and leaves plain text untimed.
 Future<Lyrics> parseLyrics({required String text, required String format}) =>
     RustLib.instance.api.crateApiContentParseLyrics(text: text, format: format);

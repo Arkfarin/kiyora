@@ -39,6 +39,7 @@ class _ImportViewState extends State<ImportView> {
   }
 
   void _refresh() {
+    if (!mounted) return;
     final pending = jobs.list(sessionId: b.sessionId);
     setState(() {
       _jobs = pending;
