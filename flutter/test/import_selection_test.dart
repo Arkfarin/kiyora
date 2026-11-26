@@ -6,6 +6,8 @@ import 'package:kiyora/features/imports/import_draft_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:kiyora/core/bridge/generated/api/jobs.dart' as jobs;
+import 'package:kiyora/core/bridge/generated/api/imports.dart' as imports;
+import 'package:kiyora/core/bridge/generated/api/auth.dart' as auth;
 import 'package:kiyora/core/bridge/generated/frb_generated.dart';
 import 'package:kiyora/core/state/backend_controller.dart';
 import 'package:kiyora/features/imports/import_selection.dart';
@@ -25,6 +27,11 @@ class MemoryDraftStore extends ImportDraftStore {
 }
 
 class ImportApi extends TestApi {
+  @override
+  Future<List<imports.Preview>> crateApiImportsPreviews({
+    required String sessionId,
+    required auth.Operation operation,
+  }) async => [];
   int nextId = 0;
   final calls = <(String, String, List<jobs.ImportFile>)>[];
   Completer<void>? firstBatch;

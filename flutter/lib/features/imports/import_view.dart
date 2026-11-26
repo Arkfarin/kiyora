@@ -5,6 +5,7 @@ import '../../core/bridge/generated/api/jobs.dart' as jobs;
 import '../../core/state/backend_controller.dart';
 import '../library/track_actions.dart';
 import 'import_selection.dart';
+import 'import_editor.dart';
 
 class ImportView extends StatefulWidget {
   const ImportView({super.key, required this.backend, this.selection});
@@ -24,6 +25,9 @@ class _ImportViewState extends State<ImportView> {
     super.initState();
     _selection = widget.selection ?? ImportSelection(b);
     _refresh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_selection.restored) _selection.restore();
+    });
     b.jobRevision.addListener(_refresh);
   }
 
@@ -94,9 +98,44 @@ class _ImportViewState extends State<ImportView> {
                 const Text(
                   'Выберите файлы. Загрузка продолжится, пока приложение открыто; состояние операций сохраняет KIYORA.',
                 ),
+                const SizedBox(height: 16),
+                if (b.error != null) Text(b.error.toString()),
+                if (_selection.saveError != null) ...[
+                  const Text(
+                    'Не удалось сохранить черновики на диске. Не закрывайте приложение до повторного сохранения.',
+                  ),
+                  TextButton(
+                    onPressed: b.busy ? null : _selection.saveDrafts,
+                    child: const Text('Повторить сохранение'),
+                  ),
+                ],
+                Wrap(
+                  spacing: 12,
+                  children: [
+                    TextButton.icon(
+                      onPressed: b.busy ? null : _selection.restore,
+                      icon: const Icon(Icons.refresh),
+                      label: Text(
+                        _selection.restored
+                            ? 'Проверить состояние импорта'
+                            : 'Восстановить черновики',
+                      ),
+                    ),
+                    if (b.busy)
+                      TextButton(
+                        onPressed: b.cancel,
+                        child: const Text('Отменить ожидание'),
+                      ),
+                  ],
+                ),
+                if (b.busy) const LinearProgressIndicator(),
                 const SizedBox(height: 24),
                 FilledButton.icon(
-                  onPressed: _selecting || b.busy || _selection.files.isNotEmpty
+                  onPressed:
+                      _selecting ||
+                          b.busy ||
+                          !_selection.restored ||
+                          _selection.files.isNotEmpty
                       ? null
                       : _pick,
                   icon: const Icon(Icons.audio_file_outlined),
@@ -122,12 +161,57 @@ class _ImportViewState extends State<ImportView> {
                     child: const Text('Отменить выбор'),
                   ),
                 ],
-                const SizedBox(height: 28),
-                Text(
-                  'Загрузки и операции',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
               ],
+            ),
+          ),
+        ),
+        SliverList.builder(
+          itemCount: _selection.files.length,
+          itemBuilder: (context, index) {
+            final file = _selection.files[index];
+            return ListTile(
+              title: Text(file.path.split('/').last),
+              subtitle: Text(
+                file.path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: IconButton(
+                tooltip: 'Редактировать перед импортом',
+                onPressed: b.busy || _selection.retrying
+                    ? null
+                    : () => _selection.prepare(file),
+                icon: const Icon(Icons.edit_outlined),
+              ),
+            );
+          },
+        ),
+        if (_selection.drafts.isNotEmpty)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Подготовленные файлы · черновики сохраняются на этом устройстве',
+              ),
+            ),
+          ),
+        SliverList.builder(
+          itemCount: _selection.drafts.length,
+          itemBuilder: (context, index) {
+            final draft = _selection.drafts[index];
+            return ImportEditor(
+              key: ValueKey(draft.id),
+              selection: _selection,
+              draft: draft,
+            );
+          },
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Загрузки и операции',
+              style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
         ),

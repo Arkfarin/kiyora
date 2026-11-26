@@ -88,3 +88,13 @@ Current risks and next gates:
    currently exists.
 
 Do not start Windows or Android work as a continuation of these gates.
+
+## Import editor ownership
+
+`ImportView` and `ImportEditor` use the session-owned `ImportSelection`. Rust owns
+staged audio, prepared-import fingerprints, upload journals and command receipts.
+The existing `ImportDraftStore` persists only the form and exact retry request,
+scoped to profile and Vault. The UI invokes preview/list/discard/commit/resume and
+command-status APIs; it does not create another backend staging store. Recovery
+runs when opening Import and can be retried explicitly. A failed durable save
+prevents submission. Ordinary unprepared file selections remain session-local.

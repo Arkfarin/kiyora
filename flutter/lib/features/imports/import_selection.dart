@@ -62,6 +62,7 @@ class ImportSelection extends ChangeNotifier {
     for (final draft in _drafts) {
       if (draft.id == command.operationId && draft.locked) {
         draft.command = command;
+        draft.review = null;
         notifyListeners();
       }
     }
@@ -157,6 +158,37 @@ class ImportSelection extends ChangeNotifier {
     });
   }
 
+  /// File pickers/readers run inside the same busy guard as submission. A late
+  /// picker result cannot change a frozen request or a different session.
+  Future<void> loadArtwork(
+    ImportDraft draft,
+    Future<Uint8List?> Function() read,
+  ) => backend.action(() async {
+    if (!_active || draft.locked || !_drafts.contains(draft)) return;
+    final bytes = await read();
+    if (bytes == null || !_active || draft.locked) return;
+    draft.artwork = bytes.asUnmodifiableView();
+    draft.clearArtwork = false;
+    await _save();
+  });
+
+  Future<void> loadLyrics(
+    ImportDraft draft,
+    Future<({String text, String format})?> Function() read,
+  ) => backend.action(() async {
+    if (!_active || draft.locked || !_drafts.contains(draft)) return;
+    final value = await read();
+    if (value == null || !_active || draft.locked) return;
+    // Validate with the existing Rust parser before replacing the user's text.
+    await content.parseLyrics(text: value.text, format: value.format);
+    if (!_active) return;
+    draft.lyricsText = value.text;
+    draft.lyricsFormat = value.format;
+    draft.replaceLyrics = true;
+    draft.clearLyrics = false;
+    await _save();
+  });
+
   Future<void> saveDrafts() => backend.action(() async {
     await _load();
     if (_active) await _save();
@@ -240,6 +272,10 @@ class ImportSelection extends ChangeNotifier {
     await _save(); // Fail closed: no native commit without a durable exact request.
     if (!_active) return;
     final request = draft.request!;
+    // Once a new attempt starts, the previous duplicate review is no longer
+    // evidence that nothing was sent. A lost reply must block discarding it.
+    draft.review = null;
+    notifyListeners();
     final result = await imports.commit(
       sessionId: sessionId,
       previewId: draft.id,

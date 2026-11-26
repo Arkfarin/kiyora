@@ -12,9 +12,13 @@ import 'package:kiyora/core/bridge/generated/frb_generated.dart';
 import 'package:kiyora/core/state/backend_controller.dart';
 import 'package:kiyora/core/theme/kiyora_theme.dart';
 import 'package:kiyora/features/player/player.dart';
-import 'backend_controller_test.dart' show TestApi;
 
-class EmptyLibrary extends TestApi {
+import 'backend_controller_test.dart' show TestApi;
+import 'import_selection_test.dart' show ImportApi, MemoryDraftStore;
+
+import 'package:kiyora/features/imports/import_selection.dart';
+
+class EmptyLibrary extends ImportApi {
   @override
   Future<List<jobs.Job>> crateApiJobsList({required String sessionId}) async =>
       [];
@@ -70,9 +74,13 @@ void main() {
       await backend.close();
       RustLib.dispose();
     });
+    final selection = ImportSelection(backend, store: MemoryDraftStore());
+    addTearDown(selection.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: ImportView(backend: backend)),
+        home: Scaffold(
+          body: ImportView(backend: backend, selection: selection),
+        ),
       ),
     );
     await tester.pumpAndSettle();

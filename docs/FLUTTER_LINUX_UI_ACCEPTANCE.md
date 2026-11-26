@@ -14,7 +14,7 @@ panel/bottom-player composition, retaining KIYORA's own branding and red accent
 | Context panels | Queue, lyrics and current-track views |
 | Queue | Rust queue IDs/revisions, reorder and mutation calls |
 | Lyrics | Typed lyrics reads/parser output, timed-line display and seek controls |
-| Import | Native picker, review/send and durable job progress/actions |
+| Import | Native picker, bulk send, prepared-file metadata/artwork/lyrics editor, duplicate confirmation, recovery drafts and durable job progress/actions |
 | Onboarding/settings | Profile/auth/Vault controls, cache and maintenance API calls |
 
 These source paths are under `flutter/lib/features/`. Source presence does not
@@ -39,3 +39,25 @@ restoration. Measure scrolling/rebuilds on a rendered 10,000-track library.
 The paging unit test proves reachability and a bounded item window, not frame
 rate. The existing narrow-width shell tests are not complete accessibility or
 layout coverage. Theme colors in source are not evidence of visual quality.
+
+## Prepared import editor (2026-11-26)
+
+The import page now opens the existing Rust preview API per selected file. Its
+form edits metadata, replaces/removes/restores artwork, imports UTF-8
+LRC/SRT/WebVTT/plain lyrics through the Rust parser, and optionally writes tags
+to the staged copy. Ordinary bulk submission remains available for the remaining
+files. Prepared files are excluded from that batch.
+
+Drafts belong to the session and are restored from the existing UI recovery file
+plus Rust previews/command receipts. The first commit freezes its IDs, edit bytes,
+parsed lyric lines and write-tags setting. Duplicate confirmation changes only
+`allowDuplicate`; a lost confirmation reply removes the stale review actions.
+Only an Applied receipt is displayed as confirmed. Cancellation stops waiting;
+it does not promise to undo an upload already accepted by the backend.
+
+Widget checks exercise preparation, navigation, duplicate confirmation,
+ServerAck versus Applied, cancellation/retry and attachment controls at 400,
+720 and 1280 logical pixels of content width. These use mocked bridge responses.
+Real file-picker interaction, Telegram upload and manual visual acceptance remain
+unverified. A backend-only preview without its local request is deliberately
+read-only and can only resume an existing journal; the UI does not invent IDs.

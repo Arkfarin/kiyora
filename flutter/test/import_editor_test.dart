@@ -246,6 +246,58 @@ void main() {
     },
   );
 
+  test(
+    'lost duplicate confirmation cannot discard an uncertain import',
+    () async {
+      final draft = await prepare();
+      native.duplicate = true;
+      await selection.submit(draft);
+      expect(draft.review, isNotNull);
+      native.failCommit = true;
+      await selection.submit(draft, confirmDuplicate: true);
+      expect(draft.review, isNull);
+      expect(draft.allowDuplicate, isTrue);
+      await selection.discard(draft);
+      expect(native.discarded, 0);
+      selection.dispose();
+      selection = ImportSelection(backend, store: store);
+      await selection.restore();
+      native.failCommit = false;
+      await selection.submit(selection.drafts.single);
+      expect(native.committed[2], native.committed[1]);
+      expect(selection.drafts.single.applied, isTrue);
+    },
+  );
+
+  test(
+    'attachment selection validates lyrics and fences concurrent submission',
+    () async {
+      final draft = await prepare();
+      final selected = Completer<Uint8List?>();
+      final loading = selection.loadArtwork(draft, () => selected.future);
+      await selection.submit(draft);
+      expect(native.committed, isEmpty);
+      selected.complete(Uint8List.fromList([1, 2, 3]));
+      await loading;
+      expect(draft.artwork, [1, 2, 3]);
+      await selection.loadLyrics(
+        draft,
+        () async => (text: 'New lyrics', format: 'plain'),
+      );
+      expect(draft.lyricsText, 'New lyrics');
+      expect(draft.lyricsFormat, 'plain');
+      native.failParse = true;
+      await selection.loadLyrics(
+        draft,
+        () async => (text: 'Broken', format: 'lrc'),
+      );
+      expect(draft.lyricsText, 'New lyrics');
+      expect(draft.locked, isFalse);
+      await selection.loadArtwork(draft, () async => null);
+      expect(draft.artwork, [1, 2, 3]);
+    },
+  );
+
   test('duplicate confirmation only changes allowDuplicate', () async {
     final draft = await prepare();
     native.duplicate = true;

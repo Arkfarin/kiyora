@@ -140,3 +140,17 @@ This test reproduced a >10-second stall in souvlaki's D-Bus detach behind queued
 status updates. The local dependency patch is documented in
 `rust/vendor/souvlaki/KIYORA-PATCH.md`. With the bounded dispatcher and
 prioritized shutdown the scenario passed in about two seconds.
+
+## Import editor increment (2026-11-26)
+
+At the first editor UI checkpoint, `CI=true flutter test --no-pub` passed all
+51 tests and `CI=true flutter analyze --no-pub` reported no issues. The import
+subset passed 22 tests, including exact retry payloads, restart restoration,
+failed saves, invalid lyrics, navigation, duplicate confirmation reply loss and
+widget interactions at 400/720/1280 content widths.
+
+`cargo test --locked -p vault-core --test service
+preview_original_upload_and_logical_edit_roundtrip_through_snapshot` also
+passed (1 test). This uses real Rust service/storage/media code with a test
+Telegram transport. It does not prove an actual Telegram upload or file-picker
+interaction. The historical platform checks above were not rerun by this step.
