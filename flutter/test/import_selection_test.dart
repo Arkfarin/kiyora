@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:kiyora/features/imports/import_draft_store.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -9,6 +12,17 @@ import 'package:kiyora/features/imports/import_selection.dart';
 import 'package:kiyora/features/imports/import_view.dart';
 
 import 'backend_controller_test.dart' show TestApi;
+
+class MemoryDraftStore extends ImportDraftStore {
+  MemoryDraftStore() : super(File('/unused-test-store'));
+  List<Map<String, dynamic>> data = [];
+  @override
+  Future<List<Map<String, dynamic>>> read() async => data;
+  @override
+  Future<void> write(List<Map<String, Object?>> drafts) async {
+    data = drafts.map((d) => Map<String, dynamic>.from(d)).toList();
+  }
+}
 
 class ImportApi extends TestApi {
   int nextId = 0;
@@ -47,7 +61,7 @@ void main() {
     native = ImportApi();
     RustLib.initMock(api: native);
     backend = BackendController()..session = TestApi.session;
-    selection = ImportSelection(backend);
+    selection = ImportSelection(backend, store: MemoryDraftStore());
   });
   tearDown(() async {
     selection.dispose();
