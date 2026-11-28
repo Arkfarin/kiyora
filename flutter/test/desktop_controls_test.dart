@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:kiyora/core/bridge/generated/api.dart' as api;
 import 'package:kiyora/core/bridge/generated/api/content.dart' as content;
 import 'package:kiyora/core/bridge/generated/frb_generated.dart';
+import 'package:kiyora/core/routing/navigation.dart';
 import 'package:kiyora/core/state/backend_controller.dart';
 import 'package:kiyora/features/queue/queue_view.dart';
 import 'package:kiyora/features/player/player.dart';
@@ -76,6 +77,100 @@ void main() {
     positionMs: BigInt.from(1000),
     durationMs: BigInt.from(10000),
   );
+
+  testWidgets('mini player follows buffering and idle without track metadata', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PlayerBar(
+            backend: backend,
+            mobile: true,
+            openPlayer: () {},
+            openQueue: () {},
+            openLyrics: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.byTooltip('Пауза'), findsNothing);
+    backend.playback.value = api.Playback.buffering(
+      trackId: 'first',
+      positionMs: BigInt.zero,
+      durationMs: BigInt.from(10000),
+    );
+    await tester.pump();
+    expect(find.byTooltip('Пауза'), findsOneWidget);
+    await tester.tap(find.byTooltip('Пауза'));
+    await tester.pump();
+    expect(backend.transports, [const api.Transport.pause()]);
+    backend.playback.value = const api.Playback.idle();
+    await tester.pump();
+    expect(find.byTooltip('Пауза'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final size in [const Size(320, 600), const Size(800, 360)]) {
+    testWidgets('full player remains usable at $size with large text', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final navigation = MusicNavigation();
+      addTearDown(navigation.dispose);
+      backend.playback.value = playing('first');
+      backend.currentTrack.value = content.TrackDetail(
+        id: 'first',
+        revision: '1',
+        sources: const [],
+        metadata: content.Metadata(
+          title: 'A long composition title for a narrow music player',
+          artist: 'An artist with a long name',
+          album: '',
+          albumArtist: '',
+          durationMs: BigInt.from(10000),
+          year: 0,
+          genre: '',
+          trackNumber: 0,
+          discNumber: 0,
+          bitrate: 0,
+          codec: '',
+          composer: '',
+          comment: '',
+          copyright: '',
+        ),
+      );
+      int opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(1.6)),
+            child: child!,
+          ),
+          home: FullscreenPlayer(
+            backend: backend,
+            navigation: navigation,
+            openQueue: () => opened++,
+            openLyrics: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('-0:09'), findsOneWidget);
+      expect(find.byTooltip('Добавить в любимые'), findsOneWidget);
+      final queue = find.text('Очередь');
+      await tester.ensureVisible(queue);
+      await tester.pumpAndSettle();
+      await tester.tap(queue);
+      expect(opened, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   testWidgets('seek is discarded after track changes during drag', (
     tester,

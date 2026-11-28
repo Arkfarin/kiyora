@@ -375,7 +375,7 @@ class BackendController extends ChangeNotifier {
     if (epoch == _epoch) _setPlayback(state);
   });
   Future<void> togglePlayback() => transport(
-    playback.value is api.Playback_Playing
+    playbackWantsAudio(playback.value)
         ? const api.Transport.pause()
         : const api.Transport.resume(),
   );
@@ -486,6 +486,9 @@ String? playbackTrackId(api.Playback state) => switch (state) {
   api.Playback_Failed(:final trackId) => trackId,
   _ => null,
 };
+
+bool playbackWantsAudio(api.Playback state) =>
+    state is api.Playback_Playing || state is api.Playback_Buffering;
 
 (int, int) playbackTime(api.Playback state) => switch (state) {
   api.Playback_Playing(:final positionMs, :final durationMs) ||

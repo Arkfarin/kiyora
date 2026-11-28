@@ -211,6 +211,7 @@ class _MusicShellState extends State<MusicShell> {
         reverseTransitionDuration: const Duration(milliseconds: 220),
         pageBuilder: (_, _, _) => FullscreenPlayer(
           backend: b,
+          navigation: _navigation,
           openQueue: () => _openPanel(ContextPanel.queue),
           openLyrics: () => _openPanel(ContextPanel.lyrics),
         ),

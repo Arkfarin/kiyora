@@ -4,8 +4,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/bridge/generated/api.dart' as api;
+import '../../core/bridge/generated/api/content.dart' as content;
+import '../../core/bridge/generated/api/edits.dart' as edits;
+import '../../core/routing/navigation.dart';
 import '../../core/state/backend_controller.dart';
 import '../../core/widgets/artwork.dart';
+import '../library/track_actions.dart';
 
 String musicTime(int milliseconds) {
   final seconds = math.max(0, milliseconds ~/ 1000);
@@ -17,9 +21,11 @@ class PlaybackProgress extends StatefulWidget {
     super.key,
     required this.backend,
     this.compact = false,
+    this.showRemaining = false,
   });
   final BackendController backend;
   final bool compact;
+  final bool showRemaining;
   @override
   State<PlaybackProgress> createState() => _PlaybackProgressState();
 }
@@ -93,68 +99,84 @@ class _PlaybackProgressState extends State<PlaybackProgress> {
           minHeight: 2,
           value: duration == 0 ? 0 : (position / duration).clamp(0, 1),
         );
+      final slider = Slider(
+        value: value,
+        max: math.max(1, duration).toDouble(),
+        semanticFormatterCallback: (v) => musicTime(v.toInt()),
+        onChangeStart: !enabled
+            ? null
+            : (_) {
+                _dragTrack = track;
+                _gestureInvalid = false;
+              },
+        onChanged: !enabled
+            ? null
+            : (v) {
+                if (!_gestureInvalid && _dragTrack == track) {
+                  setState(() => _drag = v);
+                }
+              },
+        onChangeEnd: !enabled
+            ? null
+            : (v) {
+                final current = widget.backend.playback.value;
+                final valid =
+                    !_gestureInvalid &&
+                    _dragTrack != null &&
+                    _dragTrack == playbackTrackId(current) &&
+                    !widget.backend.busy &&
+                    playbackTime(current).$2 > 0;
+                setState(() {
+                  _drag = null;
+                  _dragTrack = null;
+                  _gestureInvalid = false;
+                });
+                if (valid) {
+                  widget.backend.transport(
+                    api.Transport.seek(
+                      milliseconds: BigInt.from(
+                        v.round().clamp(0, playbackTime(current).$2),
+                      ),
+                    ),
+                  );
+                }
+              },
+      );
+      final elapsed = Text(
+        musicTime(value.toInt()),
+        textAlign: TextAlign.end,
+        style: Theme.of(context).textTheme.labelSmall,
+      );
+      final total = Text(
+        widget.showRemaining
+            ? '-${musicTime(duration - value.toInt())}'
+            : musicTime(duration),
+        style: Theme.of(context).textTheme.labelSmall,
+        semanticsLabel: widget.showRemaining
+            ? 'Осталось ${musicTime(duration - value.toInt())}'
+            : null,
+      );
+      if (widget.showRemaining) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            slider,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [elapsed, total],
+              ),
+            ),
+          ],
+        );
+      }
       return Row(
         children: [
-          SizedBox(
-            width: 45,
-            child: Text(
-              musicTime(value.toInt()),
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ),
-          Expanded(
-            child: Slider(
-              value: value,
-              max: math.max(1, duration).toDouble(),
-              semanticFormatterCallback: (v) => musicTime(v.toInt()),
-              onChangeStart: !enabled
-                  ? null
-                  : (_) {
-                      _dragTrack = track;
-                      _gestureInvalid = false;
-                    },
-              onChanged: !enabled
-                  ? null
-                  : (v) {
-                      if (!_gestureInvalid && _dragTrack == track) {
-                        setState(() => _drag = v);
-                      }
-                    },
-              onChangeEnd: !enabled
-                  ? null
-                  : (v) {
-                      final current = widget.backend.playback.value;
-                      final valid =
-                          !_gestureInvalid &&
-                          _dragTrack != null &&
-                          _dragTrack == playbackTrackId(current) &&
-                          !widget.backend.busy &&
-                          playbackTime(current).$2 > 0;
-                      setState(() {
-                        _drag = null;
-                        _dragTrack = null;
-                        _gestureInvalid = false;
-                      });
-                      if (valid) {
-                        widget.backend.transport(
-                          api.Transport.seek(
-                            milliseconds: BigInt.from(
-                              v.round().clamp(0, playbackTime(current).$2),
-                            ),
-                          ),
-                        );
-                      }
-                    },
-            ),
-          ),
-          SizedBox(
-            width: 45,
-            child: Text(
-              musicTime(duration),
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ),
+          SizedBox(width: 45, child: elapsed),
+          Expanded(child: slider),
+          SizedBox(width: 45, child: total),
         ],
       );
     },
@@ -177,97 +199,136 @@ class TransportControls extends StatelessWidget {
       final state = backend.playback.value;
       final enabled = q != null && q.total > BigInt.zero && !backend.busy;
       final accent = Theme.of(context).colorScheme.primary;
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            tooltip: q?.shuffle == true
-                ? 'Выключить перемешивание'
-                : 'Перемешать',
-            isSelected: q?.shuffle == true,
-            color: q?.shuffle == true ? accent : null,
+      final controls = <Widget>[
+        IconButton(
+          tooltip: q?.shuffle == true
+              ? 'Выключить перемешивание'
+              : 'Перемешать',
+          isSelected: q?.shuffle == true,
+          color: q?.shuffle == true ? accent : null,
+          onPressed: !enabled
+              ? null
+              : () => backend.editQueue(
+                  api.QueueEdit.shuffle(enabled: !q.shuffle),
+                ),
+          icon: const Icon(Icons.shuffle),
+        ),
+        IconButton(
+          tooltip: 'Предыдущая композиция',
+          iconSize: large ? 36 : 24,
+          onPressed: !enabled
+              ? null
+              : () => backend.transport(const api.Transport.previous()),
+          icon: const Icon(Icons.skip_previous_rounded),
+        ),
+        SizedBox.square(
+          dimension: large ? 64 : 40,
+          child: IconButton.filled(
+            tooltip: playbackWantsAudio(state) ? 'Пауза' : 'Воспроизвести',
+            style: IconButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.onSurface,
+              foregroundColor: Theme.of(context).colorScheme.surface,
+            ),
             onPressed: !enabled
                 ? null
-                : () => backend.editQueue(
-                    api.QueueEdit.shuffle(enabled: !q.shuffle),
-                  ),
-            icon: const Icon(Icons.shuffle),
+                : () {
+                    HapticFeedback.selectionClick();
+                    backend.togglePlayback();
+                  },
+            iconSize: large ? 38 : 24,
+            icon: _PlaybackIcon(state: state, size: large ? 34 : 24),
           ),
-          IconButton(
-            tooltip: 'Предыдущая композиция',
-            iconSize: large ? 36 : 24,
-            onPressed: !enabled
-                ? null
-                : () => backend.transport(const api.Transport.previous()),
-            icon: const Icon(Icons.skip_previous_rounded),
-          ),
-          const SizedBox(width: 8),
-          SizedBox.square(
-            dimension: large ? 64 : 40,
-            child: IconButton.filled(
-              tooltip: state is api.Playback_Playing
-                  ? 'Пауза'
-                  : 'Воспроизвести',
-              style: IconButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.onSurface,
-                foregroundColor: Theme.of(context).colorScheme.surface,
-              ),
-              onPressed: !enabled
-                  ? null
-                  : () {
-                      HapticFeedback.selectionClick();
-                      backend.togglePlayback();
+        ),
+        IconButton(
+          tooltip: 'Следующая композиция',
+          iconSize: large ? 36 : 24,
+          onPressed: !enabled
+              ? null
+              : () => backend.transport(const api.Transport.next()),
+          icon: const Icon(Icons.skip_next_rounded),
+        ),
+        IconButton(
+          tooltip: switch (q?.repeat) {
+            api.Repeat.off => 'Включить повтор очереди',
+            api.Repeat.all => 'Повторять композицию',
+            _ => 'Выключить повтор',
+          },
+          color: q?.repeat != null && q?.repeat != api.Repeat.off
+              ? accent
+              : null,
+          onPressed: !enabled
+              ? null
+              : () => backend.editQueue(
+                  api.QueueEdit.repeat(
+                    mode: switch (q.repeat) {
+                      api.Repeat.off => api.Repeat.all,
+                      api.Repeat.all => api.Repeat.one,
+                      api.Repeat.one => api.Repeat.off,
                     },
-              iconSize: large ? 38 : 24,
-              icon: state is api.Playback_Buffering
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      state is api.Playback_Playing
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                    ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Следующая композиция',
-            iconSize: large ? 36 : 24,
-            onPressed: !enabled
-                ? null
-                : () => backend.transport(const api.Transport.next()),
-            icon: const Icon(Icons.skip_next_rounded),
-          ),
-          IconButton(
-            tooltip: switch (q?.repeat) {
-              api.Repeat.off => 'Включить повтор очереди',
-              api.Repeat.all => 'Повторять композицию',
-              _ => 'Выключить повтор',
-            },
-            color: q?.repeat != null && q?.repeat != api.Repeat.off
-                ? accent
-                : null,
-            onPressed: !enabled
-                ? null
-                : () => backend.editQueue(
-                    api.QueueEdit.repeat(
-                      mode: switch (q.repeat) {
-                        api.Repeat.off => api.Repeat.all,
-                        api.Repeat.all => api.Repeat.one,
-                        api.Repeat.one => api.Repeat.off,
-                      },
-                    ),
                   ),
-            icon: Icon(
-              q?.repeat == api.Repeat.one ? Icons.repeat_one : Icons.repeat,
-            ),
+                ),
+          icon: Icon(
+            q?.repeat == api.Repeat.one ? Icons.repeat_one : Icons.repeat,
           ),
-        ],
+        ),
+      ];
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < (large ? 264 : 240)) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: controls.sublist(1, 4),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [controls.first, controls.last],
+                ),
+              ],
+            );
+          }
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: controls,
+          );
+        },
       );
     },
   );
+}
+
+class _PlaybackIcon extends StatelessWidget {
+  const _PlaybackIcon({required this.state, this.size = 24});
+  final api.Playback state;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(
+      playbackWantsAudio(state)
+          ? Icons.pause_rounded
+          : Icons.play_arrow_rounded,
+      size: size,
+    );
+    if (state is! api.Playback_Buffering) return icon;
+    return SizedBox.square(
+      dimension: size + 6,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: IconTheme.of(context).color,
+            ),
+          ),
+          Icon(Icons.pause_rounded, size: size * .72),
+        ],
+      ),
+    );
+  }
 }
 
 class PlayerBar extends StatelessWidget {
@@ -283,9 +344,12 @@ class PlayerBar extends StatelessWidget {
   final bool mobile;
   final VoidCallback openPlayer, openQueue, openLyrics;
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: backend.currentTrack,
-    builder: (context, track, _) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: mobile
+        ? Listenable.merge([backend.currentTrack, backend.playback])
+        : backend.currentTrack,
+    builder: (context, _) {
+      final track = backend.currentTrack.value;
       if (mobile && playbackTrackId(backend.playback.value) == null)
         return const SizedBox.shrink();
       final identity = Row(
@@ -303,7 +367,8 @@ class PlayerBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  track?.metadata.title ?? 'Выберите композицию',
+                  track?.metadata.title ??
+                      (mobile ? 'Загрузка композиции…' : 'Выберите композицию'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -344,8 +409,7 @@ class PlayerBar extends StatelessWidget {
                             backend,
                           ]),
                           builder: (context, _) => IconButton(
-                            tooltip:
-                                backend.playback.value is api.Playback_Playing
+                            tooltip: playbackWantsAudio(backend.playback.value)
                                 ? 'Пауза'
                                 : 'Воспроизвести',
                             onPressed:
@@ -355,11 +419,7 @@ class PlayerBar extends StatelessWidget {
                                         BigInt.zero
                                 ? null
                                 : backend.togglePlayback,
-                            icon: Icon(
-                              backend.playback.value is api.Playback_Playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                            ),
+                            icon: _PlaybackIcon(state: backend.playback.value),
                           ),
                         ),
                       ],
@@ -434,9 +494,11 @@ class FullscreenPlayer extends StatefulWidget {
     required this.backend,
     required this.openQueue,
     required this.openLyrics,
+    required this.navigation,
   });
   final BackendController backend;
   final VoidCallback openQueue, openLyrics;
+  final MusicNavigation navigation;
   @override
   State<FullscreenPlayer> createState() => _FullscreenPlayerState();
 }
@@ -444,157 +506,321 @@ class FullscreenPlayer extends StatefulWidget {
 class _FullscreenPlayerState extends State<FullscreenPlayer> {
   double _drag = 0;
   bool _dragging = false;
+  ColorScheme? _palette;
+  (String, String?, Brightness)? _paletteKey;
+
+  BackendController get b => widget.backend;
+
+  api.Track _summary(content.TrackDetail detail) => api.Track(
+    id: detail.id,
+    revision: detail.revision,
+    title: detail.metadata.title,
+    artist: detail.metadata.artist,
+    album: detail.metadata.album,
+    durationMs: detail.metadata.durationMs,
+    artworkDigest: detail.metadata.artworkDigest,
+  );
+
+  Future<void> _openTrackActions(content.TrackDetail detail) async {
+    final before = widget.navigation.current;
+    await showTrackActions(context, b, widget.navigation, _summary(detail));
+    if (mounted &&
+        widget.navigation.current != before &&
+        ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _favorite(content.TrackDetail detail) => b.operate((op) async {
+    b.commandResults.value = await edits.edit(
+      sessionId: b.sessionId,
+      operationId: await api.newOperationId(),
+      entityId: detail.id,
+      edit: const edits.LibraryEdit.favorite(setName: 'liked', value: true),
+      operation: op,
+    );
+  });
+
+  Widget _header() => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onVerticalDragUpdate: (details) => setState(() {
+      _dragging = true;
+      _drag = math.max(0, _drag + details.delta.dy);
+    }),
+    onVerticalDragEnd: (details) {
+      if (_drag > 140 || (details.primaryVelocity ?? 0) > 700) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() {
+          _dragging = false;
+          _drag = 0;
+        });
+      }
+    },
+    onVerticalDragCancel: () => setState(() {
+      _dragging = false;
+      _drag = 0;
+    }),
+    child: SizedBox(
+      height: 56,
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Свернуть плеер',
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+          ),
+          const Expanded(
+            child: Text('Сейчас играет', textAlign: TextAlign.center),
+          ),
+          ListenableBuilder(
+            listenable: Listenable.merge([b, b.currentTrack]),
+            builder: (context, _) {
+              final track = b.currentTrack.value;
+              return IconButton(
+                tooltip: 'Действия с композицией',
+                onPressed: track == null || b.busy
+                    ? null
+                    : () => _openTrackActions(track),
+                icon: const Icon(Icons.more_horiz),
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _artwork(
+    content.TrackDetail? track,
+    double size,
+    Brightness brightness,
+  ) {
+    final identity = (
+      track?.id ?? '',
+      track?.metadata.artworkDigest,
+      brightness,
+    );
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        if (!b.busy &&
+            (b.queue.value?.total ?? BigInt.zero) > BigInt.zero &&
+            velocity.abs() > 250) {
+          b.transport(
+            velocity < 0
+                ? const api.Transport.next()
+                : const api.Transport.previous(),
+          );
+        }
+      },
+      child: Center(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: MusicArtwork(
+            sessionId: b.sessionId,
+            trackId: track?.id,
+            digest: track?.metadata.artworkDigest,
+            size: size,
+            paletteBrightness: brightness,
+            onColorScheme: (scheme) {
+              final current = b.currentTrack.value;
+              if (!mounted ||
+                  current?.id != identity.$1 ||
+                  current?.metadata.artworkDigest != identity.$2) {
+                return;
+              }
+              setState(() {
+                _paletteKey = identity;
+                _palette = scheme;
+              });
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _controls(BuildContext context, content.TrackDetail? track) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    track?.metadata.title ?? 'Загрузка композиции…',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    track?.metadata.artist ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListenableBuilder(
+              listenable: b,
+              builder: (context, _) => IconButton(
+                tooltip: 'Добавить в любимые',
+                onPressed: track == null || b.busy
+                    ? null
+                    : () => _favorite(track),
+                icon: const Icon(Icons.favorite_border, size: 28),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ValueListenableBuilder(
+          valueListenable: b.playback,
+          builder: (context, state, _) {
+            final status = switch (state) {
+              api.Playback_Buffering() => 'Буферизация…',
+              api.Playback_Failed() => 'Не удалось воспроизвести композицию',
+              _ => null,
+            };
+            return status == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(status, style: theme.textTheme.labelMedium),
+                  );
+          },
+        ),
+        PlaybackProgress(backend: b, showRemaining: true),
+        const SizedBox(height: 12),
+        TransportControls(backend: b, large: true),
+        const SizedBox(height: 18),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          runSpacing: 8,
+          children: [
+            TextButton.icon(
+              onPressed: widget.openLyrics,
+              icon: const Icon(Icons.lyrics_outlined),
+              label: const Text('Текст песни'),
+            ),
+            TextButton.icon(
+              onPressed: widget.openQueue,
+              icon: const Icon(Icons.queue_music),
+              label: const Text('Очередь'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final reduced = MediaQuery.disableAnimationsOf(context);
+    final baseTheme = Theme.of(context);
     return AnimatedContainer(
       duration: _dragging || reduced
           ? Duration.zero
           : const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       transform: Matrix4.translationValues(0, _drag, 0),
-      child: Scaffold(
-        body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) => ValueListenableBuilder(
-              valueListenable: widget.backend.currentTrack,
-              builder: (context, track, _) {
-                final size = math.min(
-                  constraints.maxWidth - 48,
-                  math.max(180.0, constraints.maxHeight * .42),
-                );
-                return CustomScrollView(
-                  slivers: [
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
-                          children: [
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onVerticalDragUpdate: (d) => setState(() {
-                                _dragging = true;
-                                _drag = math.max(0, _drag + d.delta.dy);
-                              }),
-                              onVerticalDragEnd: (d) {
-                                if (_drag > 140 ||
-                                    (d.primaryVelocity ?? 0) > 700) {
-                                  Navigator.of(context).pop();
-                                } else {
-                                  setState(() {
-                                    _dragging = false;
-                                    _drag = 0;
-                                  });
-                                }
-                              },
-                              onVerticalDragCancel: () => setState(() {
-                                _dragging = false;
-                                _drag = 0;
-                              }),
-                              child: SizedBox(
-                                height: 64,
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Свернуть плеер',
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(),
-                                      icon: const Icon(
-                                        Icons.keyboard_arrow_down,
-                                      ),
-                                    ),
-                                    const Expanded(
-                                      child: Text(
-                                        'Сейчас играет',
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Очередь',
-                                      onPressed: widget.openQueue,
-                                      icon: const Icon(Icons.queue_music),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            GestureDetector(
-                              onHorizontalDragEnd: (d) {
-                                if (!widget.backend.busy &&
-                                    (widget.backend.queue.value?.total ??
-                                            BigInt.zero) >
-                                        BigInt.zero &&
-                                    (d.primaryVelocity ?? 0).abs() > 250)
-                                  widget.backend.transport(
-                                    d.primaryVelocity! < 0
-                                        ? const api.Transport.next()
-                                        : const api.Transport.previous(),
-                                  );
-                              },
-                              child: MusicArtwork(
-                                sessionId: widget.backend.sessionId,
-                                trackId: track?.id,
-                                digest: track?.metadata.artworkDigest,
-                                size: size,
-                              ),
-                            ),
-                            const Spacer(),
-                            const SizedBox(height: 28),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                track?.metadata.title ?? 'Выберите композицию',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                track?.metadata.artist ?? '',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            PlaybackProgress(backend: widget.backend),
-                            const SizedBox(height: 12),
-                            TransportControls(
-                              backend: widget.backend,
-                              large: true,
-                            ),
-                            const SizedBox(height: 24),
-                            Row(
+      child: ValueListenableBuilder(
+        valueListenable: b.currentTrack,
+        builder: (context, track, _) {
+          final key = (
+            track?.id ?? '',
+            track?.metadata.artworkDigest,
+            baseTheme.brightness,
+          );
+          final scheme = _paletteKey == key ? _palette : null;
+          return AnimatedTheme(
+            data: scheme == null
+                ? baseTheme
+                : baseTheme.copyWith(
+                    colorScheme: scheme,
+                    scaffoldBackgroundColor: scheme.surface,
+                    iconTheme: IconThemeData(color: scheme.onSurface),
+                  ),
+            duration: reduced
+                ? Duration.zero
+                : const Duration(milliseconds: 240),
+            child: Scaffold(
+              body: SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final height = constraints.maxHeight;
+                    final wide = width >= 720 || (width >= 600 && height < 500);
+                    final available = math.max(80.0, width - 32);
+                    final size = wide
+                        ? math.min(
+                            available * .44,
+                            math.max(160.0, height - 104),
+                          )
+                        : math.min(
+                            math.min(available, 440.0),
+                            math.max(160.0, height * .44),
+                          );
+                    return SingleChildScrollView(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: wide ? 1040 : 520,
+                            minHeight: height,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Column(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                TextButton.icon(
-                                  onPressed: widget.openLyrics,
-                                  icon: const Icon(Icons.lyrics_outlined),
-                                  label: const Text('Текст песни'),
-                                ),
-                                IconButton(
-                                  tooltip: 'Очередь',
-                                  onPressed: widget.openQueue,
-                                  icon: const Icon(Icons.queue_music),
-                                ),
+                                _header(),
+                                if (wide)
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      _artwork(
+                                        track,
+                                        size,
+                                        baseTheme.brightness,
+                                      ),
+                                      const SizedBox(width: 24),
+                                      Expanded(
+                                        child: _controls(context, track),
+                                      ),
+                                    ],
+                                  )
+                                else ...[
+                                  const SizedBox(height: 12),
+                                  _artwork(track, size, baseTheme.brightness),
+                                  const SizedBox(height: 24),
+                                  _controls(context, track),
+                                ],
+                                const SizedBox(height: 4),
                               ],
                             ),
-                            const SizedBox(height: 16),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
