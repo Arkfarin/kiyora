@@ -14,17 +14,28 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
+    parser.add_argument("--preferences", action="store_true", help="Check saved normal/maximized window state across restarts")
     args = parser.parse_args()
     executable = args.bundle.resolve() / "kiyora"
     with tempfile.TemporaryDirectory(prefix="kiyora-window-smoke-") as temporary:
-        for mode in ("wayland", "x11"):
+        runs = [(mode, phase) for mode in ("wayland", "x11")
+                for phase in (("normal", "reopen", "maximized", "reopen-maximized")
+                              if args.preferences else ("first-frame",))]
+        for mode, phase in runs:
             data = Path(temporary) / mode
-            data.mkdir(mode=0o700)
+            data.mkdir(mode=0o700, exist_ok=True)
+            preferences = data / "ui-preferences.json"
+            expected = None
+            if args.preferences:
+                expected = {"theme": "dark", "width": 960, "height": 640,
+                            "maximized": phase in ("maximized", "reopen-maximized")}
+                if phase in ("normal", "maximized"):
+                    preferences.write_text(json.dumps(expected))
             env = dict(os.environ, GDK_BACKEND=mode, KIYORA_DATA_DIR=str(data))
             for name in ("KIYORA_NATIVE_LIBRARY", "KIYORA_TDJSON"):
                 env.pop(name, None)
             stream = subprocess.Popen(["umbriel", "subscribe", "windows"],
-                                      stdout=subprocess.PIPE, text=True)
+                                      stdout=subprocess.PIPE, bufsize=0)
             selector = selectors.DefaultSelector()
             selector.register(stream.stdout, selectors.EVENT_READ)
             with tempfile.TemporaryFile() as log:
@@ -34,6 +45,7 @@ def main():
                 try:
                     deadline = time.monotonic() + 20
                     window = None
+                    last_owned = None
                     while time.monotonic() < deadline and process.poll() is None:
                         if not selector.select(0.2):
                             continue
@@ -51,23 +63,39 @@ def main():
                                 owned = os.getpgid(pid) == process.pid
                             except ProcessLookupError:
                                 continue
-                            if owned and candidate.get("visible"):
+                            if owned:
+                                last_owned = {key: candidate.get(key) for key in
+                                              ("w", "h", "visible", "maximized", "maximized_to_edges", "floating")}
+                            matches = expected is None or (
+                                bool(candidate.get("maximized")) == expected["maximized"]
+                                and ((expected["maximized"] and candidate["w"] > 960 and candidate["h"] > 640) or
+                                     (not expected["maximized"] and
+                                      (candidate["w"], candidate["h"]) == (960, 640))))
+                            if owned and candidate.get("visible") and matches:
                                 window = candidate
                                 break
                         if window:
                             break
                     if not window:
-                        raise RuntimeError(f"{mode}: no visible first-frame window")
+                        raise RuntimeError(f"{mode}/{phase}: no visible window with the expected state; last: {last_owned}")
                     if bool(window["xwayland"]) != (mode == "x11"):
                         raise RuntimeError(f"{mode}: wrong display backend")
                     if window["w"] < 720 or window["h"] < 540:
                         raise RuntimeError(f"{mode}: window below supported minimum size")
+                    if expected is not None:
+                        # Prove close writes the live state; merely retaining the
+                        # seeded file would otherwise make a missing save pass.
+                        preferences.unlink()
                     subprocess.run(["umbriel", "msg", "window-close", str(window["id"])],
                                    check=True, stdout=subprocess.DEVNULL)
                     code = process.wait(timeout=20)
                     if code != 0:
                         raise RuntimeError(f"{mode}: normal window close exited with {code}")
-                    print(f"{mode}: visible {window['w']}x{window['h']} first frame; normal close exited 0.",
+                    if expected is not None:
+                        actual = json.loads(preferences.read_text())
+                        if actual != expected:
+                            raise RuntimeError(f"{mode}/{phase}: saved preferences differ: {actual}")
+                    print(f"{mode}/{phase}: visible {window['w']}x{window['h']}; normal close exited 0.",
                           flush=True)
                 except Exception:
                     # Logs are from this disposable app and its private D-Bus only.

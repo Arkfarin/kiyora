@@ -77,6 +77,14 @@ class _MusicShellState extends State<MusicShell> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Close a docked panel when it no longer fits; do not resurrect it
+    // when the window grows again.
+    if (MediaQuery.sizeOf(context).width < 1200) _panel = null;
+  }
+
+  @override
   void dispose() {
     _searchDelay?.cancel();
     b.commandResults.removeListener(_command);
@@ -92,6 +100,7 @@ class _MusicShellState extends State<MusicShell> {
     if (MediaQuery.sizeOf(context).width >= 1200) {
       setState(() => _panel = _panel == panel ? null : panel);
     } else if (defaultTargetPlatform == TargetPlatform.linux) {
+      if (_panel != null) setState(() => _panel = null);
       showDialog<void>(
         context: context,
         builder: (context) => Dialog(
@@ -109,12 +118,24 @@ class _MusicShellState extends State<MusicShell> {
                   ),
                 ),
                 Expanded(child: _panelContent(panel)),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      PlaybackProgress(backend: b),
+                      TransportControls(backend: b),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
         ),
       );
     } else {
+      if (_panel != null) setState(() => _panel = null);
       showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
@@ -233,6 +254,7 @@ class _MusicShellState extends State<MusicShell> {
       final mobile =
           defaultTargetPlatform != TargetPlatform.linux && width < 900;
       final compactLibrary = _compactLibrary || (!mobile && width < 1040);
+      final forcedCompact = !mobile && width < 1040;
       final tokens = Theme.of(context).extension<KiyoraColors>()!;
       final player = PlayerBar(
         backend: b,
@@ -272,7 +294,7 @@ class _MusicShellState extends State<MusicShell> {
                 null)
               return KeyEventResult.ignored;
             if (event.logicalKey == LogicalKeyboardKey.space) {
-              b.togglePlayback();
+              if (!b.busy) b.togglePlayback();
               return KeyEventResult.handled;
             }
             return KeyEventResult.ignored;
@@ -423,13 +445,19 @@ class _MusicShellState extends State<MusicShell> {
                                             Row(
                                               children: [
                                                 IconButton(
-                                                  tooltip: compactLibrary
+                                                  tooltip: forcedCompact
+                                                      ? 'Открыть медиатеку'
+                                                      : compactLibrary
                                                       ? 'Раскрыть медиатеку'
                                                       : 'Свернуть медиатеку',
-                                                  onPressed: () => setState(
-                                                    () => _compactLibrary =
-                                                        !_compactLibrary,
-                                                  ),
+                                                  onPressed: forcedCompact
+                                                      ? () => _go(
+                                                          Destination.library,
+                                                        )
+                                                      : () => setState(
+                                                          () => _compactLibrary =
+                                                              !_compactLibrary,
+                                                        ),
                                                   icon: const Icon(
                                                     Icons.library_music,
                                                   ),

@@ -41,9 +41,13 @@ ThemeData kiyoraTheme(Brightness brightness) {
         seedColor: KiyoraColors.accent,
         brightness: brightness,
       ).copyWith(
-        primary: KiyoraColors.accent,
-        onPrimary: Colors.white,
+        primary: dark ? const Color(0xffff8298) : const Color(0xffbb1238),
+        onPrimary: dark ? const Color(0xff2b0010) : Colors.white,
         surface: tokens.panel,
+        onSurface: dark ? const Color(0xfff5f5f5) : const Color(0xff181818),
+        onSurfaceVariant: dark
+            ? const Color(0xffc9c9c9)
+            : const Color(0xff505050),
       );
   return ThemeData(
     useMaterial3: true,
@@ -65,9 +69,23 @@ ThemeData kiyoraTheme(Brightness brightness) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: tokens.raised,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      floatingLabelStyle: TextStyle(color: scheme.onSurfaceVariant),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: scheme.primary, width: 2),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xffbb1238),
+        foregroundColor: Colors.white,
+        minimumSize: const Size(48, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       ),
     ),
     tooltipTheme: const TooltipThemeData(

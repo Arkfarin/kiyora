@@ -136,3 +136,32 @@ The prepared-import editor and artwork preflight API were built successfully wit
 `flutter/build/linux/x64/debug/bundle/kiyora` in that checkout. This rebuild is
 not the historical release tar described above; no replacement release package
 was created or published. Runtime account/Vault and release acceptance remain open.
+
+## Usability and Linux smoke checkpoint (2026-11-28)
+
+The working tree was audited for usability, first-run authentication, bulk and
+prepared imports, metadata conflicts, lyrics, desktop navigation and playback
+controls. Fixes include avoiding duplicate navigation history, readable track
+menus on narrow screens, safe recovery from rejected metadata edits, clearer
+bulk-import duplicate review, consistent cancellation and transport controls,
+and bounded settings layout. Duplicate reviews from a raw batch are handled by
+reselecting the file and using the prepared-import editor.
+
+Validation on the current development host:
+
+- `flutter analyze --no-pub` reported no issues.
+- `flutter test --no-pub` passed, including UI navigation, authentication,
+  imports and player regression tests.
+- `cargo test --locked --workspace` passed. Tests requiring a configured audio
+  device remain explicitly ignored where applicable.
+- `python3 flutter/tool/test_native.py` passed both native bridge lifecycle
+  phases (seed and restore).
+- `flutter build linux --debug --no-pub` produced the Linux debug bundle.
+- `python3 flutter/tool/smoke_linux_window.py
+  flutter/build/linux/x64/debug/bundle --preferences` passed eight first-frame,
+  normal-close and window-preference cases: Wayland/X11, normal/reopened and
+  maximized/reopened.
+
+These checks cover an isolated development runtime. Real Telegram account,
+Vault synchronization and audio-device acceptance, an installable release and
+clean-machine compatibility certification remain separate release gates.

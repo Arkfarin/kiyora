@@ -23,6 +23,7 @@ class MusicLocation {
 
 /// UI history only; playback and its queue never live in this navigator.
 class MusicNavigation extends ChangeNotifier {
+  static const int _maxHistory = 100;
   final List<MusicLocation> _history = [const MusicLocation(Destination.home)];
   int _index = 0;
   MusicLocation get current => _history[_index];
@@ -30,9 +31,20 @@ class MusicNavigation extends ChangeNotifier {
   bool get canForward => _index + 1 < _history.length;
 
   void go(MusicLocation location) {
+    final currentLocation = current;
+    if (currentLocation.destination == location.destination &&
+        currentLocation.id == location.id &&
+        currentLocation.title == location.title &&
+        currentLocation.artist == location.artist) {
+      return;
+    }
     _history.removeRange(_index + 1, _history.length);
     _history.add(location);
     _index++;
+    if (_history.length > _maxHistory) {
+      _history.removeAt(0);
+      _index--;
+    }
     notifyListeners();
   }
 

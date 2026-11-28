@@ -1,6 +1,8 @@
 import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+
 import '../../core/bridge/generated/api.dart' as api;
 import '../../core/state/backend_controller.dart';
 import '../../core/widgets/artwork.dart';
@@ -24,11 +26,64 @@ class PlaybackProgress extends StatefulWidget {
 
 class _PlaybackProgressState extends State<PlaybackProgress> {
   double? _drag;
+  String? _dragTrack;
+  bool _gestureInvalid = false;
+
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: widget.backend.playback,
-    builder: (context, state, _) {
+  void initState() {
+    super.initState();
+    _listen(widget.backend);
+  }
+
+  void _listen(BackendController backend) {
+    backend.playback.addListener(_invalidateGesture);
+    backend.addListener(_invalidateGesture);
+  }
+
+  void _unlisten(BackendController backend) {
+    backend.playback.removeListener(_invalidateGesture);
+    backend.removeListener(_invalidateGesture);
+  }
+
+  void _invalidateGesture() {
+    if (!_gestureInvalid &&
+        _dragTrack != null &&
+        (widget.backend.busy ||
+            playbackTrackId(widget.backend.playback.value) != _dragTrack ||
+            playbackTime(widget.backend.playback.value).$2 <= 0)) {
+      setState(() {
+        _gestureInvalid = true;
+        _drag = null;
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant PlaybackProgress oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backend != widget.backend) {
+      _unlisten(oldWidget.backend);
+      _drag = null;
+      _dragTrack = null;
+      _gestureInvalid = true;
+      _listen(widget.backend);
+    }
+  }
+
+  @override
+  void dispose() {
+    _unlisten(widget.backend);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([widget.backend.playback, widget.backend]),
+    builder: (context, _) {
+      final state = widget.backend.playback.value;
+      final track = playbackTrackId(state);
       final (position, duration) = playbackTime(state);
+      final enabled = track != null && duration > 0 && !widget.backend.busy;
       final value = (_drag ?? position.toDouble()).clamp(
         0.0,
         math.max(1, duration).toDouble(),
@@ -53,15 +108,44 @@ class _PlaybackProgressState extends State<PlaybackProgress> {
               value: value,
               max: math.max(1, duration).toDouble(),
               semanticFormatterCallback: (v) => musicTime(v.toInt()),
-              onChanged: duration == 0
+              onChangeStart: !enabled
                   ? null
-                  : (v) => setState(() => _drag = v),
-              onChangeEnd: (v) {
-                setState(() => _drag = null);
-                widget.backend.transport(
-                  api.Transport.seek(milliseconds: BigInt.from(v.round())),
-                );
-              },
+                  : (_) {
+                      _dragTrack = track;
+                      _gestureInvalid = false;
+                    },
+              onChanged: !enabled
+                  ? null
+                  : (v) {
+                      if (!_gestureInvalid && _dragTrack == track) {
+                        setState(() => _drag = v);
+                      }
+                    },
+              onChangeEnd: !enabled
+                  ? null
+                  : (v) {
+                      final current = widget.backend.playback.value;
+                      final valid =
+                          !_gestureInvalid &&
+                          _dragTrack != null &&
+                          _dragTrack == playbackTrackId(current) &&
+                          !widget.backend.busy &&
+                          playbackTime(current).$2 > 0;
+                      setState(() {
+                        _drag = null;
+                        _dragTrack = null;
+                        _gestureInvalid = false;
+                      });
+                      if (valid) {
+                        widget.backend.transport(
+                          api.Transport.seek(
+                            milliseconds: BigInt.from(
+                              v.round().clamp(0, playbackTime(current).$2),
+                            ),
+                          ),
+                        );
+                      }
+                    },
             ),
           ),
           SizedBox(
@@ -253,15 +337,26 @@ class PlayerBar extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(child: identity),
-                        ValueListenableBuilder(
-                          valueListenable: backend.playback,
-                          builder: (context, state, _) => IconButton(
-                            tooltip: state is api.Playback_Playing
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            backend.playback,
+                            backend.queue,
+                            backend,
+                          ]),
+                          builder: (context, _) => IconButton(
+                            tooltip:
+                                backend.playback.value is api.Playback_Playing
                                 ? 'Пауза'
                                 : 'Воспроизвести',
-                            onPressed: backend.togglePlayback,
+                            onPressed:
+                                backend.busy ||
+                                    (backend.queue.value?.total ??
+                                            BigInt.zero) ==
+                                        BigInt.zero
+                                ? null
+                                : backend.togglePlayback,
                             icon: Icon(
-                              state is api.Playback_Playing
+                              backend.playback.value is api.Playback_Playing
                                   ? Icons.pause
                                   : Icons.play_arrow,
                             ),
@@ -427,7 +522,11 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
                             const Spacer(),
                             GestureDetector(
                               onHorizontalDragEnd: (d) {
-                                if ((d.primaryVelocity ?? 0).abs() > 250)
+                                if (!widget.backend.busy &&
+                                    (widget.backend.queue.value?.total ??
+                                            BigInt.zero) >
+                                        BigInt.zero &&
+                                    (d.primaryVelocity ?? 0).abs() > 250)
                                   widget.backend.transport(
                                     d.primaryVelocity! < 0
                                         ? const api.Transport.next()

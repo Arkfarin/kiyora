@@ -121,14 +121,36 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.byType(TransportControls), findsOneWidget);
+      if (width < 1040) {
+        await tester.tap(find.byTooltip('Открыть медиатеку'));
+        await tester.pumpAndSettle();
+        expect(find.text('Моя медиатека'), findsOneWidget);
+        await tester.tap(find.byTooltip('Главная'));
+        await tester.pumpAndSettle();
+      }
       expect(find.byTooltip('Очередь'), findsOneWidget);
       await tester.tap(find.byTooltip('Очередь'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('Добавьте музыку в очередь'), findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
+      // A modal at narrower Linux widths must keep playback controls usable.
+      expect(
+        find.byType(TransportControls),
+        findsNWidgets(width < 1200 ? 2 : 1),
+      );
       await tester.tap(find.byTooltip('Закрыть панель'));
       await tester.pumpAndSettle();
+      if (width >= 1200) {
+        await tester.tap(find.byTooltip('Очередь'));
+        await tester.pumpAndSettle();
+        tester.view.physicalSize = const Size(900, 720);
+        await tester.pumpAndSettle();
+        expect(find.text('Добавьте музыку в очередь'), findsNothing);
+        tester.view.physicalSize = Size(width, 720);
+        await tester.pumpAndSettle();
+        expect(find.text('Добавьте музыку в очередь'), findsNothing);
+      }
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);

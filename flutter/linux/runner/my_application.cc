@@ -11,11 +11,120 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+struct WindowState {
+  gint width;
+  gint height;
+  gboolean maximized;
+  gboolean first_frame_ready;
+  gboolean preferences_ready;
+  gulong maximize_after_paint;
+  gboolean first_paint_done;
+  gboolean pending_maximize;
+};
+
+static void request_restored_maximize(GtkWidget* widget, WindowState* state) {
+  if (!state->first_paint_done || !state->pending_maximize) return;
+  state->pending_maximize = FALSE;
+  g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, [](gpointer data) -> gboolean {
+    auto* window = GTK_WIDGET(data);
+    if (gtk_widget_get_realized(window)) gtk_window_maximize(GTK_WINDOW(window));
+    return G_SOURCE_REMOVE;
+  }, g_object_ref(widget), g_object_unref);
+}
+
+static gboolean window_configured(GtkWidget* widget, GdkEventConfigure* event,
+                                  gpointer user_data) {
+  auto* state = static_cast<WindowState*>(user_data);
+  GdkWindow* native = gtk_widget_get_window(widget);
+  const auto flags = native ? gdk_window_get_state(native) : GDK_WINDOW_STATE_WITHDRAWN;
+  request_restored_maximize(widget, state);
+  // Keep the normal size while maximized, fullscreen or minimized.
+  if (!(flags & (GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN |
+                 GDK_WINDOW_STATE_ICONIFIED)) &&
+      event->width >= 720 && event->height >= 540) {
+    state->width = event->width;
+    state->height = event->height;
+  }
+  return FALSE;
+}
+
+static gboolean window_state_changed(GtkWidget* widget, GdkEventWindowState* event,
+                                     gpointer user_data) {
+  auto* state = static_cast<WindowState*>(user_data);
+  state->maximized = (event->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+  request_restored_maximize(widget, state);
+  return FALSE;
+}
+
+static void maximize_after_first_paint(GdkFrameClock* clock, gpointer user_data) {
+  auto* window = GTK_WIDGET(user_data);
+  if (!gtk_widget_get_mapped(window)) return;
+  auto* state = static_cast<WindowState*>(g_object_get_data(G_OBJECT(window), "kiyora-window-state"));
+  const gulong handler = state->maximize_after_paint;
+  state->maximize_after_paint = 0;
+  if (handler) g_signal_handler_disconnect(clock, handler);
+  state->first_paint_done = TRUE;
+}
+
 static void host_method_call(FlMethodChannel* channel, FlMethodCall* call,
                              gpointer user_data) {
+  auto* window = GTK_WINDOW(user_data);
+  auto* state = static_cast<WindowState*>(g_object_get_data(G_OBJECT(window), "kiyora-window-state"));
   const gchar* name = fl_method_call_get_name(call);
   if (g_strcmp0(name, "raise") == 0) {
-    gtk_window_present(GTK_WINDOW(user_data));
+    gtk_window_present(window);
+    fl_method_call_respond_success(call, nullptr, nullptr);
+  } else if (g_strcmp0(name, "windowState") == 0) {
+    g_autoptr(FlValue) result = fl_value_new_map();
+    fl_value_set_string_take(result, "width", fl_value_new_int(state->width));
+    fl_value_set_string_take(result, "height", fl_value_new_int(state->height));
+    fl_value_set_string_take(result, "maximized", fl_value_new_bool(state->maximized));
+    fl_method_call_respond_success(call, result, nullptr);
+  } else if (g_strcmp0(name, "restoreWindow") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    FlValue* width = fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "width") : nullptr;
+    FlValue* height = fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "height") : nullptr;
+    FlValue* maximized = fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "maximized") : nullptr;
+    if (!width || !height || !maximized ||
+        fl_value_get_type(width) != FL_VALUE_TYPE_INT ||
+        fl_value_get_type(height) != FL_VALUE_TYPE_INT ||
+        fl_value_get_type(maximized) != FL_VALUE_TYPE_BOOL) {
+      fl_method_call_respond_error(call, "InvalidWindowState", "Invalid window preferences", nullptr, nullptr);
+      return;
+    }
+    state->width = static_cast<gint>(CLAMP(fl_value_get_int(width), 720, 7680));
+    state->height = static_cast<gint>(CLAMP(fl_value_get_int(height), 540, 4320));
+    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(window));
+    GdkMonitor* monitor = gdk_display_get_monitor_at_window(display, gtk_widget_get_window(GTK_WIDGET(window)));
+    if (monitor) {
+      GdkRectangle area;
+      gdk_monitor_get_workarea(monitor, &area);
+      state->width = MIN(state->width, MAX(720, area.width));
+      state->height = MIN(state->height, MAX(540, area.height));
+    }
+    gtk_window_set_default_size(window, state->width, state->height);
+    gtk_window_resize(window, state->width, state->height);
+    state->maximized = fl_value_get_bool(maximized);
+    state->pending_maximize = state->maximized;
+    if (state->maximized) {
+      // Wait for a compositor configure/state event after the first paint.
+      // A request sent with the first surface commit can arrive before mapping.
+      GdkFrameClock* clock = gtk_widget_get_frame_clock(GTK_WIDGET(window));
+      if (clock) {
+        if (state->maximize_after_paint) g_signal_handler_disconnect(clock, state->maximize_after_paint);
+        state->maximize_after_paint = g_signal_connect_object(clock, "after-paint",
+            G_CALLBACK(maximize_after_first_paint), window, G_CONNECT_AFTER);
+      } else {
+        gtk_window_maximize(window);
+      }
+    } else {
+      gtk_window_unmaximize(window);
+    }
+    state->preferences_ready = TRUE;
+    if (state->first_frame_ready) gtk_widget_show(GTK_WIDGET(window));
     fl_method_call_respond_success(call, nullptr, nullptr);
   } else {
     fl_method_call_respond_not_implemented(call, nullptr);
@@ -24,7 +133,12 @@ static void host_method_call(FlMethodChannel* channel, FlMethodCall* call,
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GtkWidget* window = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  auto* state = static_cast<WindowState*>(g_object_get_data(G_OBJECT(window), "kiyora-window-state"));
+  state->first_frame_ready = TRUE;
+  // Do not map the surface with default geometry while Dart is still loading
+  // saved preferences. Wayland controls geometry once a surface is mapped.
+  if (state->preferences_ready) gtk_widget_show(window);
 }
 
 // Implements GApplication::activate.
@@ -34,6 +148,12 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   gtk_window_set_default_size(window, 1280, 720);
+  auto* state = g_new0(WindowState, 1);
+  state->width = 1280;
+  state->height = 720;
+  g_object_set_data_full(G_OBJECT(window), "kiyora-window-state", state, g_free);
+  g_signal_connect(window, "configure-event", G_CALLBACK(window_configured), state);
+  g_signal_connect(window, "window-state-event", G_CALLBACK(window_state_changed), state);
   // Keep the desktop transport and navigation usable when the window shrinks.
   GdkGeometry geometry = {};
   geometry.min_width = 720;

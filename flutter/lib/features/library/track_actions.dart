@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api/edits.dart' as edits;
 import '../../core/bridge/generated/api.dart' as api;
@@ -121,11 +122,18 @@ Future<void> showTrackActions(
         for (final (id, icon, title) in actions)
           PopupMenuItem(
             value: id,
+            height: 56,
             child: Row(
               children: [
                 Icon(icon, size: 20),
                 const SizedBox(width: 12),
-                Text(title),
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
@@ -296,8 +304,10 @@ class _MetadataEditorState extends State<_MetadataEditor> {
   late final _title = TextEditingController(text: widget.track.title);
   late final _artist = TextEditingController(text: widget.track.artist);
   late final _album = TextEditingController(text: widget.track.album);
+  late String _revision = widget.track.revision;
   String? _operationId;
   bool _saving = false;
+  bool _rejected = false;
   edits.MetadataEdit? _attempt;
   String? _outcome;
   @override
@@ -340,6 +350,15 @@ class _MetadataEditorState extends State<_MetadataEditor> {
                 padding: const EdgeInsets.only(top: 16),
                 child: Text(_outcome!),
               ),
+            if (_rejected)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: OutlinedButton.icon(
+                  onPressed: _saving || widget.backend.busy ? null : _reload,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Загрузить актуальные данные'),
+                ),
+              ),
           ],
         ),
       ),
@@ -350,12 +369,13 @@ class _MetadataEditorState extends State<_MetadataEditor> {
         child: const Text('Закрыть'),
       ),
       FilledButton(
-        onPressed: _saving ? null : _save,
+        onPressed: _saving || widget.backend.busy || _rejected ? null : _save,
         child: Text(_attempt == null ? 'Сохранить' : 'Проверить результат'),
       ),
     ],
   );
   Future<void> _save() async {
+    if (_saving || widget.backend.busy || _rejected) return;
     setState(() => _saving = true);
     final b = widget.backend;
     await b.operate((op) async {
@@ -364,17 +384,19 @@ class _MetadataEditorState extends State<_MetadataEditor> {
           sessionId: b.sessionId,
           operationId: _operationId!,
         );
-        if (mounted)
-          setState(
-            () => _outcome = result == null
+        if (mounted) {
+          setState(() {
+            _outcome = result == null
                 ? 'Команда ещё не подтверждена. Изменения не отправлены повторно.'
-                : commandMessage(result),
-          );
+                : commandMessage(result);
+            _rejected = result?.state == edits.CommandState.rejected;
+          });
+        }
         return;
       }
       _operationId = await api.newOperationId();
       _attempt = edits.MetadataEdit(
-        expectedRevision: widget.track.revision,
+        expectedRevision: _revision,
         title: _title.text,
         artist: _artist.text,
         album: _album.text,
@@ -400,12 +422,45 @@ class _MetadataEditorState extends State<_MetadataEditor> {
         operation: op,
       );
       b.commandResults.value = result;
-      if (mounted) setState(() => _outcome = commandMessage(result));
+      if (mounted)
+        setState(() {
+          _outcome = commandMessage(result);
+          _rejected = result.state == edits.CommandState.rejected;
+        });
     });
     if (mounted)
       setState(() {
         _saving = false;
         _outcome ??= b.error?.toString();
+      });
+  }
+
+  Future<void> _reload() async {
+    if (!_rejected || _saving || widget.backend.busy) return;
+    setState(() => _saving = true);
+    final b = widget.backend;
+    await b.action(() async {
+      final latest = await content.track(
+        sessionId: b.sessionId,
+        trackId: widget.track.id,
+      );
+      if (latest == null) throw StateError('Композиция больше не найдена');
+      if (!mounted) return;
+      _title.text = latest.metadata.title;
+      _artist.text = latest.metadata.artist;
+      _album.text = latest.metadata.album;
+      setState(() {
+        _revision = latest.revision;
+        _operationId = null;
+        _attempt = null;
+        _rejected = false;
+        _outcome = 'Данные обновлены. Внесите изменения и сохраните.';
+      });
+    });
+    if (mounted)
+      setState(() {
+        _saving = false;
+        if (b.error != null) _outcome = b.error.toString();
       });
   }
 }
