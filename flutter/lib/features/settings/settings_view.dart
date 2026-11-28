@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../core/bridge/generated/api/auth.dart' as auth;
@@ -23,15 +26,70 @@ class SettingsView extends StatefulWidget {
 
 class _SettingsViewState extends State<SettingsView> {
   offline.Cache? _cache;
+  String? _cacheSession;
   BackendController get b => widget.backend;
-  Future<void> _loadCache() => b.operate((op) async {
+  Future<void> _loadCache({BigInt? quota}) => b.operate((op) async {
+    final session = b.sessionId;
     final cache = await offline.cache(
-      sessionId: b.sessionId,
-      quotaBytes: null,
+      sessionId: session,
+      quotaBytes: quota,
       operation: op,
     );
-    if (mounted) setState(() => _cache = cache);
+    if (mounted && b.session?.sessionId == session) {
+      setState(() {
+        _cache = cache;
+        _cacheSession = session;
+      });
+    }
   });
+
+  Future<void> _chooseQuota() async {
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Размер кэша'),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
+            child: Text(
+              'Уменьшение лимита может удалить незакреплённые файлы. Закреплённая музыка сохранится.',
+            ),
+          ),
+          for (final gib in [1, 2, 5, 10, 20, 50])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, gib),
+              child: Text('$gib ГиБ'),
+            ),
+        ],
+      ),
+    );
+    if (selected != null && mounted && !b.busy) {
+      await _loadCache(quota: BigInt.from(selected * 1024 * 1024 * 1024));
+    }
+  }
+
+  Future<void> _openProject() async {
+    const url = 'https://github.com/Arkfarin/kiyora';
+    try {
+      if (Platform.isAndroid) {
+        await const MethodChannel('io.github.arkfarin.kiyora/host')
+            .invokeMethod<void>('openProjectPage');
+        return;
+      }
+      if (Platform.isLinux) {
+        final result = await Process.run('xdg-open', [url]);
+        if (result.exitCode == 0) return;
+      }
+    } catch (_) {
+      // The repository is still accessible when a browser is unavailable.
+    }
+    await Clipboard.setData(const ClipboardData(text: url));
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Ссылка скопирована')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: b,
@@ -124,7 +182,7 @@ class _SettingsViewState extends State<SettingsView> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Локальный кэш'),
               subtitle: Text(
-                _cache == null
+                _cache == null || _cacheSession != b.session?.sessionId
                     ? 'Доступность музыки офлайн зависит от скачанных файлов.'
                     : '${_fileSize(_cache!.usedBytes)} из ${_fileSize(_cache!.quotaBytes)}',
               ),
@@ -133,6 +191,12 @@ class _SettingsViewState extends State<SettingsView> {
                 onPressed: b.busy ? null : _loadCache,
                 icon: const Icon(Icons.refresh),
               ),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.storage_outlined),
+              title: const Text('Изменить лимит кэша'),
+              onTap: b.busy || !b.hasLibrary ? null : _chooseQuota,
             ),
             TextButton(
               onPressed: b.busy
@@ -186,9 +250,15 @@ class _SettingsViewState extends State<SettingsView> {
             const ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('KIYORA'),
-              subtitle: Text(
-                'Ваша музыка в Telegram. Воспроизведение и хранение работают на Rust.',
-              ),
+              subtitle: Text('Ваша музыка в Telegram. Автор: arkfarin.'),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.code),
+              title: const Text('GitHub'),
+              subtitle: const Text('Arkfarin/kiyora'),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: _openProject,
             ),
             TextButton(
               onPressed: () =>

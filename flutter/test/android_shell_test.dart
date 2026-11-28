@@ -204,6 +204,15 @@ void main() {
     );
     await tester.tap(find.byTooltip('Очистить поиск'));
     await tester.pumpAndSettle();
+    expect(find.text('Недавние запросы'), findsOneWidget);
+    await tester.tap(find.text('Kiyora'));
+    await tester.pumpAndSettle();
+    expect(native.searches.last, ('albums', 'Kiyora'));
+    await tester.tap(find.byTooltip('Очистить поиск'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Очистить'));
+    await tester.pumpAndSettle();
+    expect(find.text('Недавние запросы'), findsNothing);
     expect(native.searches.last, ('albums', ''));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

@@ -7,17 +7,43 @@ class UiPreferences {
     this.width = 1280,
     this.height = 720,
     this.maximized = false,
+    this.searchHistory = const {},
   });
 
   final String theme;
   final int width;
   final int height;
   final bool maximized;
+  final Map<String, List<String>> searchHistory;
+
+  static List<String> normalizeHistory(Iterable<Object?> values) {
+    final result = <String>[];
+    final seen = <String>{};
+    for (final value in values) {
+      if (value is! String) continue;
+      final query = value.trim();
+      if (query.isEmpty || query.length > 128 || !seen.add(query.toLowerCase()))
+        continue;
+      result.add(query);
+      if (result.length == 10) break;
+    }
+    return List.unmodifiable(result);
+  }
 
   factory UiPreferences.fromJson(Map<String, dynamic> json) {
     final theme = json['theme'];
     final width = json['width'];
     final height = json['height'];
+    final histories = <String, List<String>>{};
+    final rawHistory = json['searchHistory'];
+    if (rawHistory is Map<String, dynamic>) {
+      for (final entry in rawHistory.entries.take(8)) {
+        if (entry.key.isEmpty || entry.key.length > 128 || entry.value is! List)
+          continue;
+        final normalized = normalizeHistory(entry.value as List);
+        if (normalized.isNotEmpty) histories[entry.key] = normalized;
+      }
+    }
     return UiPreferences(
       theme: ['system', 'light', 'dark'].contains(theme)
           ? theme as String
@@ -25,6 +51,7 @@ class UiPreferences {
       width: width is int && width >= 720 && width <= 7680 ? width : 1280,
       height: height is int && height >= 540 && height <= 4320 ? height : 720,
       maximized: json['maximized'] == true,
+      searchHistory: Map.unmodifiable(histories),
     );
   }
 
@@ -33,11 +60,12 @@ class UiPreferences {
     'width': width,
     'height': height,
     'maximized': maximized,
+    if (searchHistory.isNotEmpty) 'searchHistory': searchHistory,
   };
 }
 
 /// Presentation settings only. Telegram credentials and library state stay in Rust.
-/// Writes are ordered and replace the file atomically on Linux.
+/// Writes are ordered and replace the file atomically on Linux and Android.
 class UiPreferencesStore {
   UiPreferencesStore(this.file);
   final File file;
@@ -83,6 +111,7 @@ class UiPreferencesStore {
       width: value.width,
       height: value.height,
       maximized: value.maximized,
+      searchHistory: value.searchHistory,
     ),
   );
 
@@ -93,6 +122,19 @@ class UiPreferencesStore {
       'theme': value.theme,
     }),
   );
+
+  Future<void> setSearchHistory(String profileId, Iterable<String> queries) {
+    if (profileId.isEmpty || profileId.length > 128) return Future.value();
+    final normalized = UiPreferences.normalizeHistory(queries);
+    final histories = <String, List<String>>{
+      if (normalized.isNotEmpty) profileId: normalized,
+      for (final entry in value.searchHistory.entries)
+        if (entry.key != profileId) entry.key: entry.value,
+    };
+    return _save(
+      UiPreferences.fromJson({...value.toJson(), 'searchHistory': histories}),
+    );
+  }
 
   Future<void> _save(UiPreferences next) {
     value = next;

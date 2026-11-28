@@ -84,7 +84,7 @@ class _KiyoraAppState extends State<KiyoraApp> {
       _startupError = null;
     });
     try {
-      if (Platform.isLinux) {
+      if (Platform.isLinux || Platform.isAndroid) {
         await (_loadingPreferences ??= _loadPreferences());
       }
       if (_exiting || !mounted) return;
@@ -135,7 +135,21 @@ class _KiyoraAppState extends State<KiyoraApp> {
 
   Future<void> _loadPreferences() async {
     try {
-      _preferences = UiPreferencesStore.linux();
+      if (Platform.isAndroid) {
+        final directory = await _host.invokeMethod<String>(
+          'preferencesDirectory',
+        );
+        if (directory == null || directory.isEmpty) {
+          throw const FileSystemException(
+            'Configuration directory unavailable',
+          );
+        }
+        _preferences = UiPreferencesStore(
+          File('$directory/ui-preferences.json'),
+        );
+      } else {
+        _preferences = UiPreferencesStore.linux();
+      }
       await _preferences!.load();
       _theme = ThemeMode.values.byName(_preferences!.value.theme);
     } catch (_) {
@@ -144,7 +158,7 @@ class _KiyoraAppState extends State<KiyoraApp> {
     // The Linux runner maps its first frame after receiving geometry, including
     // defaults when reading the settings failed. This avoids a Wayland resize
     // racing the initial surface configure.
-    if (!_exiting && mounted) {
+    if (Platform.isLinux && !_exiting && mounted) {
       try {
         await _host.invokeMethod<void>(
           'restoreWindow',
@@ -172,14 +186,32 @@ class _KiyoraAppState extends State<KiyoraApp> {
 
   Future<void> _changeTheme(ThemeMode mode) async {
     setState(() => _theme = mode);
-    if (!Platform.isLinux) return;
+    if (!Platform.isLinux && !Platform.isAndroid) return;
     try {
-      _preferences ??= UiPreferencesStore.linux();
+      if (_preferences == null) {
+        await _loadPreferences();
+        // Restore may update _theme; the user's explicit choice wins.
+        if (mounted) setState(() => _theme = mode);
+      }
+      if (_preferences == null) {
+        throw const FileSystemException('Configuration directory unavailable');
+      }
       await _preferences!.setTheme(mode.name);
     } catch (_) {
       _reportPreferencesError(
         'Не удалось сохранить тему. Проверьте доступ к папке настроек.',
       );
+    }
+  }
+
+  Future<void> _changeSearchHistory(
+    String profileId,
+    List<String> queries,
+  ) async {
+    try {
+      await _preferences?.setSearchHistory(profileId, queries);
+    } catch (_) {
+      _reportPreferencesError('Не удалось сохранить историю поиска.');
     }
   }
 
@@ -227,16 +259,28 @@ class _KiyoraAppState extends State<KiyoraApp> {
           )
         : ListenableBuilder(
             listenable: widget.backend,
-            builder: (context, _) => widget.backend.hasLibrary
-                ? MusicShell(
-                    key: ValueKey(widget.backend.session?.sessionId),
-                    backend: widget.backend,
-                    themeMode: _theme,
-                    onThemeChanged: _changeTheme,
-                  )
-                : Scaffold(
-                    body: SafeArea(child: Onboarding(backend: widget.backend)),
-                  ),
+            builder: (context, _) {
+              final profileId = widget.backend.session?.profileId;
+              return widget.backend.hasLibrary
+                  ? MusicShell(
+                      key: ValueKey(widget.backend.session?.sessionId),
+                      backend: widget.backend,
+                      themeMode: _theme,
+                      onThemeChanged: _changeTheme,
+                      searchHistory:
+                          _preferences?.value.searchHistory[profileId] ??
+                          const [],
+                      onSearchHistoryChanged: (queries) {
+                        if (profileId != null)
+                          unawaited(_changeSearchHistory(profileId, queries));
+                      },
+                    )
+                  : Scaffold(
+                      body: SafeArea(
+                        child: Onboarding(backend: widget.backend),
+                      ),
+                    );
+            },
           ),
   );
 }

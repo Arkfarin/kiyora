@@ -21,6 +21,32 @@ void main() {
     expect(await file.exists(), isFalse);
   });
 
+  test(
+    'search history is bounded, profile-specific and survives theme changes',
+    () async {
+      final store = UiPreferencesStore(file);
+      await store.setSearchHistory('first', [
+        '  Song ',
+        'song',
+        '',
+        ...List.generate(12, (i) => 'Track $i'),
+      ]);
+      await store.setSearchHistory('second', ['Another song']);
+      await store.setTheme('dark');
+      await store.setWindow({'width': 900});
+      final reopened = UiPreferencesStore(file);
+      await reopened.load();
+      expect(reopened.value.searchHistory['first']!.length, 10);
+      expect(reopened.value.searchHistory['first']!.first, 'Song');
+      expect(reopened.value.searchHistory['second'], ['Another song']);
+      await reopened.setSearchHistory('first', []);
+      final cleared = UiPreferencesStore(file);
+      await cleared.load();
+      expect(cleared.value.searchHistory.containsKey('first'), isFalse);
+      expect(cleared.value.searchHistory['second'], ['Another song']);
+    },
+  );
+
   test('rapid theme and window changes survive a new store instance', () async {
     final store = UiPreferencesStore(file);
     final writes = [

@@ -43,10 +43,14 @@ class MusicShell extends StatefulWidget {
     required this.backend,
     required this.themeMode,
     required this.onThemeChanged,
+    this.searchHistory = const [],
+    this.onSearchHistoryChanged,
   });
   final BackendController backend;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeChanged;
+  final List<String> searchHistory;
+  final ValueChanged<List<String>>? onSearchHistoryChanged;
   @override
   State<MusicShell> createState() => _MusicShellState();
 }
@@ -67,11 +71,13 @@ class _MusicShellState extends State<MusicShell> {
   LibraryFilter _mobileLibraryFilter = LibraryFilter.tracks;
   LibraryFilter _mobileSearchFilter = LibraryFilter.tracks;
   String _mobileLibraryQuery = '';
+  late List<String> _searchHistory;
   BackendController get b => widget.backend;
   late final ImportSelection _imports;
   @override
   void initState() {
     super.initState();
+    _searchHistory = List.of(widget.searchHistory);
     _imports = ImportSelection(b);
     _navigation.addListener(_rememberMobileTab);
     b.commandResults.addListener(_command);
@@ -114,6 +120,7 @@ class _MusicShellState extends State<MusicShell> {
 
   void _rememberMobileTab() {
     final location = _navigation.current;
+    final wasSearching = _mobileTab == 1;
     _mobileTab = switch (location.destination) {
       Destination.home => 0,
       Destination.search => 1,
@@ -123,6 +130,7 @@ class _MusicShellState extends State<MusicShell> {
     _tabHistory[location] = _mobileTab;
     if (_isMobileLayout(MediaQuery.sizeOf(context).width) &&
         location.destination != Destination.search) {
+      if (wasSearching) _rememberSearch(_search.text);
       _searchDelay?.cancel();
       _query = _search.text;
       _searchFocus.unfocus();
@@ -281,6 +289,12 @@ class _MusicShellState extends State<MusicShell> {
     final key = ValueKey(
       '${location.destination}:${location.id}:${location.title}:${location.artist}',
     );
+    if (mobile &&
+        location.destination == Destination.search &&
+        _query.trim().isEmpty &&
+        _searchHistory.isNotEmpty) {
+      return _recentSearches();
+    }
     return switch (location.destination) {
       Destination.home => HomeView(
         key: key,
@@ -359,7 +373,7 @@ class _MusicShellState extends State<MusicShell> {
     _navigation.reset();
     if (destination != Destination.home) _go(destination);
     if (destination == Destination.search &&
-        (focusSearch || _search.text.isEmpty)) {
+        (focusSearch || (_search.text.isEmpty && _searchHistory.isEmpty))) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _navigation.current.destination == Destination.search) {
           _searchFocus.requestFocus();
@@ -378,6 +392,66 @@ class _MusicShellState extends State<MusicShell> {
       }
     });
   }
+
+  void _rememberSearch(String value) {
+    final query = value.trim();
+    if (query.isEmpty ||
+        query.length > 128 ||
+        _searchHistory.firstOrNull == query)
+      return;
+    _setSearchHistory(
+      [
+        query,
+        ..._searchHistory.where(
+          (previous) => previous.toLowerCase() != query.toLowerCase(),
+        ),
+      ].take(10).toList(),
+    );
+  }
+
+  void _setSearchHistory(List<String> queries) {
+    setState(() => _searchHistory = queries);
+    widget.onSearchHistoryChanged?.call(List.unmodifiable(queries));
+  }
+
+  Widget _recentSearches() => ListView(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Недавние запросы',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          TextButton(
+            onPressed: () => _setSearchHistory([]),
+            child: const Text('Очистить'),
+          ),
+        ],
+      ),
+      for (final query in _searchHistory)
+        ListTile(
+          leading: const Icon(Icons.history),
+          title: Text(query, maxLines: 2, overflow: TextOverflow.ellipsis),
+          trailing: IconButton(
+            tooltip: 'Удалить запрос',
+            onPressed: () => _setSearchHistory(
+              _searchHistory.where((item) => item != query).toList(),
+            ),
+            icon: const Icon(Icons.close),
+          ),
+          onTap: () {
+            _searchDelay?.cancel();
+            _search.text = query;
+            _searchFocus.unfocus();
+            setState(() => _query = query);
+            _rememberSearch(query);
+          },
+        ),
+    ],
+  );
 
   Widget _mobileSearchField() => Padding(
     padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -408,6 +482,7 @@ class _MusicShellState extends State<MusicShell> {
         onSubmitted: (value) {
           _searchDelay?.cancel();
           setState(() => _query = value);
+          _rememberSearch(value);
           _searchFocus.unfocus();
         },
       ),
