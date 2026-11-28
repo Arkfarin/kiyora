@@ -298,7 +298,9 @@ impl AuthStatus {
                 _ => Err(TelegramError::ResendUnavailable),
             };
         }
-        if matches!(input, AuthInput::Qr) {
+        // TDLib 1.8.69 permits changing the phone in the same entry states as
+        // QR authentication, provided no authentication query is outstanding.
+        if matches!(input, AuthInput::Qr | AuthInput::Phone(_)) {
             return if self.can_request_qr() {
                 Ok(())
             } else {
@@ -508,5 +510,47 @@ mod tests {
         );
         tokio::time::advance(std::time::Duration::from_millis(500)).await;
         assert_eq!(attempts.check(), Ok(()));
+    }
+
+    #[test]
+    fn phone_changes_follow_documented_authentication_entry_states() {
+        let phone = AuthInput::Phone("+10000000000".to_owned().into());
+        for state in [
+            AuthStatus::PhoneRequired,
+            AuthStatus::CodeRequired {
+                code_info: AuthCodeInfo {
+                    delivery: CodeDelivery::TelegramMessage,
+                    expected_length: Some(5),
+                    timeout_seconds: Some(30),
+                    next_delivery: None,
+                },
+            },
+            AuthStatus::PasswordRequired,
+            AuthStatus::EmailRequired,
+            AuthStatus::EmailCodeRequired {
+                expected_length: Some(6),
+            },
+            AuthStatus::RegistrationRequired,
+            AuthStatus::PremiumRequired,
+        ] {
+            assert_eq!(state.validate_input(&phone), Ok(()), "{state:?}");
+        }
+        for state in [
+            AuthStatus::Ready,
+            AuthStatus::LoggingOut,
+            AuthStatus::Closing,
+            AuthStatus::Closed,
+            AuthStatus::Unsupported,
+            AuthStatus::ParametersRequired,
+            AuthStatus::QrConfirmation {
+                link: "tg://login?token=test".into(),
+            },
+        ] {
+            assert_eq!(
+                state.validate_input(&phone),
+                Err(TelegramError::AuthStateMismatch),
+                "{state:?}"
+            );
+        }
     }
 }

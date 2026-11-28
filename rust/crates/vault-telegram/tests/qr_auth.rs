@@ -114,6 +114,27 @@ async fn native_qr_updates_confirmation_2fa_cancellation_reconnect_and_session_r
         saved
     );
 
+    // Changing the phone must reach TDLib from code/2FA/email entry states,
+    // rather than being rejected locally as it was by the old UI adapter.
+    for state in [
+        "WaitCode",
+        "WaitPassword",
+        "WaitEmailAddress",
+        "WaitEmailCode",
+    ] {
+        client
+            .call(json!({"@type":"testSetState","state":state}))
+            .await
+            .unwrap();
+        assert!(matches!(
+            client
+                .authenticate(AuthInput::Phone("+10000000000".to_owned().into()))
+                .await
+                .unwrap(),
+            AuthStatus::CodeRequired { .. }
+        ));
+    }
+
     // Every documented entry state, plus unsupported/terminal states.
     for state in [
         "WaitPhoneNumber",

@@ -336,6 +336,8 @@ class ImportSelection extends ChangeNotifier {
   final BackendController backend;
   final String sessionId;
   List<jobs.ImportFile> _files = [];
+  final _filenames = <String, String>{};
+  String? filenameFor(String operationId) => _filenames[operationId];
   String? _jobId;
   bool _disposed = false;
   List<jobs.ImportFile> get files => List.unmodifiable(_files);
@@ -360,6 +362,12 @@ class ImportSelection extends ChangeNotifier {
       if (!_active) return;
     }
     _files = files;
+    for (final file in files) {
+      _filenames[file.operationId] = file.path.split('/').last;
+    }
+    while (_filenames.length > 2000) {
+      _filenames.remove(_filenames.keys.first);
+    }
     notifyListeners();
   });
 

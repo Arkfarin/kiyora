@@ -65,6 +65,17 @@ Future<Artwork?> playlistArtwork({
   operation: operation,
 );
 
+/// Explicitly inspect the original audio's tags without changing library metadata.
+Future<Lyrics?> embeddedLyrics({
+  required String sessionId,
+  required String trackId,
+  required Operation operation,
+}) => RustLib.instance.api.crateApiContentEmbeddedLyrics(
+  sessionId: sessionId,
+  trackId: trackId,
+  operation: operation,
+);
+
 Future<Lyrics?> lyrics({
   required String sessionId,
   required String trackId,

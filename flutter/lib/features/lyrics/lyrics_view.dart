@@ -1,7 +1,9 @@
 import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api.dart' as api;
@@ -25,19 +27,39 @@ class _LyricsViewState extends State<LyricsView> {
   int _active = -1;
   int _generation = 0;
   bool _loading = false;
+  bool _readingEmbedded = false;
   bool _follow = true;
   List<(int, int)> _timings = [];
   @override
   void initState() {
     super.initState();
     widget.backend.playback.addListener(_tick);
+    widget.backend.libraryRevision.addListener(_reload);
     _tick();
+  }
+
+  @override
+  void didUpdateWidget(covariant LyricsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backend == widget.backend) return;
+    oldWidget.backend.playback.removeListener(_tick);
+    oldWidget.backend.libraryRevision.removeListener(_reload);
+    widget.backend.playback.addListener(_tick);
+    widget.backend.libraryRevision.addListener(_reload);
+    _track = playbackTrackId(widget.backend.playback.value);
+    _load();
+  }
+
+  void _reload() {
+    _track = playbackTrackId(widget.backend.playback.value);
+    _load();
   }
 
   @override
   void dispose() {
     _generation++;
     widget.backend.playback.removeListener(_tick);
+    widget.backend.libraryRevision.removeListener(_reload);
     unawaited(_operation?.cancel());
     super.dispose();
   }
@@ -74,20 +96,29 @@ class _LyricsViewState extends State<LyricsView> {
     _followActive();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool readEmbedded = false}) async {
     final generation = ++_generation;
-    await _operation?.cancel();
-    if (!mounted || generation != _generation) return;
+    final previous = _operation;
+    _operation = null;
+    // Clear stale lines immediately; a slow cancellation must not leave the
+    // previous song's text visible or seekable on the new song.
     setState(() {
       _lyrics = null;
       _timings = [];
       _error = null;
       _active = -1;
       _loading = _track != null;
+      _readingEmbedded = readEmbedded;
       _follow = true;
     });
     final track = _track;
-    if (track == null) return;
+    final sessionId = widget.backend.session?.sessionId;
+    await previous?.cancel();
+    if (!mounted || generation != _generation) return;
+    if (track == null || sessionId == null) {
+      setState(() => _loading = false);
+      return;
+    }
     try {
       final operation = await auth.Operation.newInstance();
       if (!mounted || generation != _generation) {
@@ -95,8 +126,9 @@ class _LyricsViewState extends State<LyricsView> {
         return;
       }
       _operation = operation;
-      final lyrics = await content.lyrics(
-        sessionId: widget.backend.sessionId,
+      final read = readEmbedded ? content.embeddedLyrics : content.lyrics;
+      final lyrics = await read(
+        sessionId: sessionId,
         trackId: track,
         operation: operation,
       );
@@ -167,20 +199,54 @@ class _LyricsViewState extends State<LyricsView> {
           ),
         ),
         if (_loading) const LinearProgressIndicator(),
+        if (_readingEmbedded && lines.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Text('Оригинальный текст из тегов аудиофайла'),
+          ),
         Expanded(
           child: _error != null
               ? Center(
                   child: TextButton(
-                    onPressed: _load,
+                    onPressed: () => _load(readEmbedded: _readingEmbedded),
                     child: const Text('Не удалось загрузить текст. Повторить'),
                   ),
                 )
               : lines.isEmpty
               ? Center(
-                  child: Text(
-                    _loading
-                        ? 'Загружаем текст…'
-                        : 'Для этой композиции пока нет текста',
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _loading
+                              ? 'Загружаем текст…'
+                              : _track == null
+                              ? 'Включите композицию, чтобы увидеть текст'
+                              : _readingEmbedded
+                              ? 'В аудиофайле тоже нет текста'
+                              : 'Для этой композиции пока нет текста',
+                          textAlign: TextAlign.center,
+                        ),
+                        if (!_loading &&
+                            _track != null &&
+                            !_readingEmbedded) ...[
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            onPressed: () => _load(readEmbedded: true),
+                            icon: const Icon(Icons.audio_file_outlined),
+                            label: const Text('Проверить текст в аудиофайле'),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'При необходимости загрузим аудиофайл из Telegram.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 )
               : NotificationListener<UserScrollNotification>(
@@ -220,9 +286,9 @@ class _LyricsViewState extends State<LyricsView> {
                                   color:
                                       i == _active || lines[i].startMs == null
                                       ? Theme.of(context).colorScheme.onSurface
-                                      : Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
+                                      : Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                 ),
                             child: Text(lines[i].text),
                           ),

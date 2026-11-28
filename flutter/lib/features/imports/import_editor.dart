@@ -60,10 +60,28 @@ class ImportEditor extends StatelessWidget {
         ? null
         : draft.artwork ?? preview?.artwork?.bytes;
     final busy = selection.backend.busy;
+    if (draft.applied) {
+      return ListTile(
+        leading: const Icon(Icons.check_circle_outline),
+        title: Text(draft.fields['title'] ?? draft.filename),
+        subtitle: const Text('Импорт подтверждён'),
+        trailing: IconButton(
+          tooltip: 'Убрать из черновиков',
+          onPressed: busy ? null : () => selection.discard(draft),
+          icon: const Icon(Icons.close),
+        ),
+      );
+    }
     return ExpansionTile(
       key: PageStorageKey('import-editor-${draft.id}'),
-      initiallyExpanded: true,
-      title: Text(draft.fields['title'] ?? draft.filename),
+      initiallyExpanded: !draft.applied,
+      title: Text(
+        draft.fields['title']?.trim().isNotEmpty == true
+            ? draft.fields['title']!
+            : draft.filename,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(
         draft.applied
             ? 'Импорт подтверждён'
@@ -90,7 +108,10 @@ class ImportEditor extends StatelessWidget {
             'Найден подготовленный файл без локального запроса. Можно проверить состояние и продолжить операцию из журнала; изменить данные здесь нельзя.',
           ),
         if (preview != null) ...[
-          Text('${preview.metadata.codec} · ${preview.sizeBytes} байт'),
+          Text(
+            '${preview.metadata.codec.toUpperCase()} · '
+            '${(preview.sizeBytes.toDouble() / (1024 * 1024)).toStringAsFixed(1)} МиБ',
+          ),
           for (final warning in preview.warnings) Text(warning),
         ],
         if (draft.fields.isNotEmpty) ...[
@@ -152,13 +173,14 @@ class ImportEditor extends StatelessWidget {
             Text(draft.clearArtwork ? 'Обложка будет удалена' : 'Нет обложки'),
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               TextButton(
                 onPressed: editable ? _artwork : null,
                 child: const Text('Выбрать обложку'),
               ),
               TextButton(
-                onPressed: editable
+                onPressed: editable && cover != null
                     ? () => change((d) {
                         d.artwork = null;
                         d.clearArtwork = true;
@@ -179,6 +201,7 @@ class ImportEditor extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text('Текст песни', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             isExpanded: true,
             key: ValueKey(
@@ -189,7 +212,7 @@ class ImportEditor extends StatelessWidget {
                 : draft.replaceLyrics
                 ? 'replace'
                 : 'keep',
-            decoration: const InputDecoration(labelText: 'Действие с текстом'),
+            decoration: const InputDecoration(),
             items: const [
               DropdownMenuItem(
                 value: 'keep',
@@ -205,6 +228,7 @@ class ImportEditor extends StatelessWidget {
                   })
                 : null,
           ),
+          const SizedBox(height: 12),
           if (!draft.replaceLyrics && !draft.clearLyrics)
             Text(
               preview?.lyrics == null
@@ -214,13 +238,24 @@ class ImportEditor extends StatelessWidget {
           if (!draft.replaceLyrics &&
               !draft.clearLyrics &&
               preview?.lyrics != null)
-            Text(
-              preview!.lyrics!.lines
-                  .take(6)
-                  .map((line) => line.text)
-                  .join('\n'),
-              maxLines: 6,
-              overflow: TextOverflow.ellipsis,
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 8, bottom: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                preview!.lyrics!.lines
+                    .where((line) => line.text.trim().isNotEmpty)
+                    .take(6)
+                    .map((line) => line.text)
+                    .join('\n'),
+                style: const TextStyle(height: 1.5),
+                maxLines: 6,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           TextButton.icon(
             onPressed: editable ? _lyrics : null,
@@ -228,6 +263,7 @@ class ImportEditor extends StatelessWidget {
             label: const Text('Загрузить LRC / SRT / VTT / TXT'),
           ),
           if (draft.replaceLyrics && !draft.clearLyrics) ...[
+            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               isExpanded: true,
               key: ValueKey('lyrics-format-${draft.id}-${draft.lyricsFormat}'),
@@ -244,9 +280,11 @@ class ImportEditor extends StatelessWidget {
                   ? (value) => change((d) => d.lyricsFormat = value!)
                   : null,
             ),
+            const SizedBox(height: 16),
             // Importing a file must replace a mounted form's old text too.
             _LyricsInput(selection: selection, draft: draft),
           ],
+          const SizedBox(height: 20),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Записать теги в загружаемую копию'),
@@ -335,7 +373,18 @@ class _LyricsInputState extends State<_LyricsInput> {
     enabled: !widget.selection.backend.busy && !widget.draft.locked,
     minLines: 4,
     maxLines: 10,
-    decoration: const InputDecoration(labelText: 'Текст и временные метки'),
+    decoration: InputDecoration(
+      labelText:
+          widget.draft.lyricsFormat == 'plain' ||
+              widget.draft.lyricsFormat == 'txt'
+          ? 'Текст песни'
+          : 'Текст и временные метки',
+      alignLabelWithHint: true,
+      hintText: widget.draft.lyricsFormat == 'lrc'
+          ? '[00:12.00]Первая строка песни'
+          : null,
+      floatingLabelBehavior: FloatingLabelBehavior.always,
+    ),
     onChanged: (value) =>
         widget.selection.update(widget.draft, (d) => d.lyricsText = value),
   );

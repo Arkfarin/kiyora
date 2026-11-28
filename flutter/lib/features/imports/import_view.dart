@@ -112,6 +112,7 @@ class _ImportViewState extends State<ImportView> {
                 ],
                 Wrap(
                   spacing: 12,
+                  runSpacing: 8,
                   children: [
                     TextButton.icon(
                       onPressed: b.busy ? null : _selection.restore,
@@ -122,7 +123,7 @@ class _ImportViewState extends State<ImportView> {
                             : 'Восстановить черновики',
                       ),
                     ),
-                    if (b.busy)
+                    if (b.canCancel)
                       TextButton(
                         onPressed: b.cancel,
                         child: const Text('Отменить ожидание'),
@@ -147,19 +148,26 @@ class _ImportViewState extends State<ImportView> {
                   const SizedBox(height: 20),
                   Text('Выбрано файлов: ${_selection.files.length}'),
                   const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: b.busy ? null : _selection.send,
-                    child: Text(
-                      !_selection.retrying
-                          ? 'Отправить как есть'
-                          : 'Продолжить отправку',
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: b.busy || _selection.retrying
-                        ? null
-                        : _selection.clear,
-                    child: const Text('Отменить выбор'),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      FilledButton(
+                        onPressed: b.busy ? null : _selection.send,
+                        child: Text(
+                          !_selection.retrying
+                              ? 'Отправить как есть'
+                              : 'Продолжить отправку',
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: b.busy || _selection.retrying
+                            ? null
+                            : _selection.clear,
+                        child: const Text('Отменить выбор'),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -171,7 +179,11 @@ class _ImportViewState extends State<ImportView> {
           itemBuilder: (context, index) {
             final file = _selection.files[index];
             return ListTile(
-              title: Text(file.path.split('/').last),
+              title: Text(
+                file.path.split('/').last,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
               subtitle: Text(
                 file.path,
                 maxLines: 1,
@@ -246,13 +258,16 @@ class _ImportViewState extends State<ImportView> {
     ),
   );
   Widget _job(jobs.Job job) {
-    final state = switch (job.state) {
-      jobs.JobState.running => 'Выполняется',
-      jobs.JobState.succeeded => 'Обработка завершена',
-      jobs.JobState.failed => 'Ошибка',
-      jobs.JobState.cancelled => 'Отменено',
-      jobs.JobState.interrupted => 'Прервано',
-    };
+    final needsReview = job.files.any((file) => file.review != null);
+    final state = needsReview
+        ? 'Проверка дубликатов'
+        : switch (job.state) {
+            jobs.JobState.running => 'Выполняется',
+            jobs.JobState.succeeded => 'Обработка завершена',
+            jobs.JobState.failed => 'Ошибка',
+            jobs.JobState.cancelled => 'Отменено',
+            jobs.JobState.interrupted => 'Прервано',
+          };
     return ExpansionTile(
       title: Text(state),
       subtitle: Text('${job.completed} из ${job.total}'),
@@ -264,7 +279,7 @@ class _ImportViewState extends State<ImportView> {
                 : (job.completed.toDouble() / job.total.toDouble()).clamp(0, 1),
           ),
         if (job.error != null) ListTile(title: Text(job.error!.message)),
-        for (final file in job.files)
+        for (final (index, file) in job.files.indexed)
           ListTile(
             leading: Icon(
               file.error != null
@@ -273,18 +288,28 @@ class _ImportViewState extends State<ImportView> {
                   ? Icons.copy_outlined
                   : Icons.audio_file_outlined,
             ),
-            title: Text(file.review?.title ?? file.operationId),
+            title: Text(_fileTitle(file, index)),
             subtitle: Text(
               file.error?.message ??
                   (file.review != null
-                      ? 'Возможный дубликат. Требуется решение.'
+                      ? 'Возможный дубликат. Выберите тот же файл снова и откройте редактор (значок карандаша), чтобы подтвердить импорт.'
                       : file.command != null
                       ? commandMessage(file.command!)
                       : 'Ожидаем подтверждения'),
             ),
+            onTap: file.review == null || _selecting || b.busy ? null : _pick,
+            trailing: file.review == null
+                ? null
+                : IconButton(
+                    tooltip: 'Выбрать файл для проверки дубликата',
+                    onPressed: _selecting || b.busy ? null : _pick,
+                    icon: const Icon(Icons.file_open_outlined),
+                  ),
           ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 12,
+          runSpacing: 8,
           children: [
             if (job.state == jobs.JobState.running)
               TextButton(
@@ -317,5 +342,14 @@ class _ImportViewState extends State<ImportView> {
         ),
       ],
     );
+  }
+
+  String _fileTitle(jobs.FileResult file, int index) {
+    if (file.review?.title.isNotEmpty == true) return file.review!.title;
+    for (final draft in _selection.drafts) {
+      if (draft.id == file.operationId)
+        return draft.fields['title'] ?? draft.filename;
+    }
+    return _selection.filenameFor(file.operationId) ?? 'Файл ${index + 1}';
   }
 }

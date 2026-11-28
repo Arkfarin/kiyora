@@ -263,6 +263,7 @@ pub(crate) async fn try_start<T: Telegram + Clone + 'static>(
         }));
     }
     let journal = Journal {
+        discover_lyrics: false,
         replacement_order: None,
         info: ImportInfo {
             op_id,

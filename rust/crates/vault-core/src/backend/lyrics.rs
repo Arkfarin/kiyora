@@ -1,5 +1,63 @@
 use super::*;
 impl Backend {
+    /// Explicit read-only recovery for tracks imported before lyrics were
+    /// published separately. Never used automatically: absent logical lyrics
+    /// may be an intentional removal while the audio still contains tags.
+    pub async fn embedded_lyrics(
+        &self,
+        session_id: Uuid,
+        track_id: Uuid,
+        cancel: &CancellationToken,
+    ) -> Result<Option<vault_domain::LyricsDocument>, ApiError> {
+        let reader = self.local_reader(session_id).await?;
+        let track = reader
+            .state()
+            .await?
+            .tracks
+            .get(&track_id)
+            .cloned()
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidInput))?;
+        let source_id = track
+            .preferred_source_id
+            .filter(|id| track.sources.contains_key(id))
+            .or_else(|| track.sources.keys().next().copied())
+            .ok_or_else(|| ApiError::new(ErrorCode::MediaSourceMissing))?;
+        let cache = {
+            let guard = self.session.lock().await;
+            let session = guard
+                .as_ref()
+                .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+            check_session(session, session_id)?;
+            session.cache.clone()
+        };
+        let key = media_cache_key(track_id, source_id);
+        let mut lease = cache.acquire(&key)?;
+        if lease.is_none() {
+            self.service_request(
+                session_id,
+                VaultRequest::DownloadForOffline {
+                    download_id: Uuid::new_v4(),
+                    track_id,
+                    source_id,
+                    pinned: false,
+                },
+                cancel,
+            )
+            .await?;
+            lease = cache.acquire(&key)?;
+        }
+        let lease = lease.ok_or_else(|| ApiError::new(ErrorCode::MediaUnavailable))?;
+        let token = cancel.clone();
+        tokio::task::spawn_blocking(move || {
+            if token.is_cancelled() {
+                return Err(ApiError::new(ErrorCode::Cancelled));
+            }
+            vault_media::embedded_lyrics(&lease.path).map_err(Into::into)
+        })
+        .await
+        .map_err(|_| ApiError::new(ErrorCode::Internal))?
+    }
+
     pub async fn lyrics(
         &self,
         session_id: Uuid,

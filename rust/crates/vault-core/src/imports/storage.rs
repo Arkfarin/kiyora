@@ -293,6 +293,7 @@ mod tests {
         fs::write(original, wav()).unwrap();
         let asset = vault_media::inspect(original).unwrap();
         Journal {
+            discover_lyrics: false,
             replacement_order: None,
             incoming: None,
             artwork_upload_unknown: false,

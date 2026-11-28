@@ -41,7 +41,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1114479397;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1300850783;
 
 // Section: executor
 
@@ -1589,6 +1589,70 @@ fn wire__crate__api__edit_queue_impl(
                             api_queue_id,
                             api_revision,
                             api_edit,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__content__embedded_lyrics_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "embedded_lyrics",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            let api_track_id = <String>::sse_decode(&mut deserializer);
+            let api_operation = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Operation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::BridgeError>(
+                    (move || async move {
+                        let mut api_operation_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_operation,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_operation_guard =
+                                        Some(api_operation.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_operation_guard = api_operation_guard.unwrap();
+                        let output_ok = crate::api::content::embedded_lyrics(
+                            api_session_id,
+                            api_track_id,
+                            &*api_operation_guard,
                         )
                         .await?;
                         std::result::Result::Ok(output_ok)
@@ -5004,48 +5068,49 @@ fn pde_ffi_dispatcher_primary_impl(
         27 => wire__crate__api__edits__edit_metadata_impl(port, ptr, rust_vec_len, data_len),
         28 => wire__crate__api__edits__edit_playlist_impl(port, ptr, rust_vec_len, data_len),
         29 => wire__crate__api__edit_queue_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__jobs__export_backup_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__edits__favorites_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__jobs__forget_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__jobs__import_files_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__initialize_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__library_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__jobs__list_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__auth__logout_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__content__lyrics_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__new_operation_id_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__content__parse_lyrics_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__offline__pin_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__play_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__content__play_playlist_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__playback_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__edits__playlist_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__content__playlist_artwork_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__content__playlists_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__content__prepare_artwork_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__imports__preview_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__imports__previews_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__profiles_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__projection_marker_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__queue_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__content__recently_played_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__auth__reconnect_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__jobs__recover_database_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__jobs__repair_database_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__imports__resume_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__jobs__resume_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__vault__resume_creation_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__vault__session_details_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__shutdown_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__auth__status_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__jobs__status_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__offline__status_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__vault__status_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__switch_profile_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__vault__synchronize_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__take_window_raise_request_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__content__track_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__content__embedded_lyrics_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__jobs__export_backup_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__edits__favorites_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__jobs__forget_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__jobs__import_files_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__initialize_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__library_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__jobs__list_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__auth__logout_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__content__lyrics_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__new_operation_id_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__content__parse_lyrics_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__offline__pin_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__play_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__content__play_playlist_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__playback_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__edits__playlist_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__content__playlist_artwork_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__content__playlists_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__content__prepare_artwork_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__imports__preview_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__imports__previews_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__profiles_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__projection_marker_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__queue_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__content__recently_played_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__auth__reconnect_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__jobs__recover_database_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__jobs__repair_database_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__imports__resume_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__jobs__resume_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault__resume_creation_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__vault__session_details_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__shutdown_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__auth__status_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__jobs__status_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__offline__status_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__vault__status_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__switch_profile_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__vault__synchronize_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__take_window_raise_request_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__content__track_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

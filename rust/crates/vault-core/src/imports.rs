@@ -59,6 +59,10 @@ pub struct ImportInfo {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Journal {
+    // Only raw local imports discover embedded lyrics. A prepared edit may
+    // deliberately clear them while leaving the original audio bytes intact.
+    #[serde(default)]
+    discover_lyrics: bool,
     #[serde(default)]
     replacement_order: Option<vault_domain::MessageId>,
     info: ImportInfo,
@@ -286,6 +290,7 @@ pub(crate) async fn start<T: Telegram + Clone + 'static>(
     .await
     .map_err(|_| ApiError::new(ErrorCode::Internal))?
     .map_err(ApiError::from)?;
+    let discover_lyrics = metadata_override.is_none();
     if let Some(metadata) = metadata_override {
         asset.metadata = metadata;
     }
@@ -333,6 +338,7 @@ pub(crate) async fn start<T: Telegram + Clone + 'static>(
         return Err(ApiError::new(ErrorCode::Conflict));
     }
     let journal = Journal {
+        discover_lyrics,
         replacement_order,
         incoming,
         artwork_upload_unknown: false,
@@ -492,6 +498,47 @@ pub(crate) async fn resume<T: Telegram + Clone + 'static>(
         events.emit(context, EventData::Import(Box::new(journal.info.clone())));
     }
     incoming::verify_copy(engine, &journal, cancel).await?;
+    if journal.discover_lyrics {
+        let root = storage.root();
+        let saved = journal.clone();
+        let token = cancel.clone();
+        let lyrics = blocking(move || {
+            let audio = Storage::verified(&root, &saved, &token)?;
+            vault_media::embedded_lyrics(&audio).map_err(Into::into)
+        })
+        .await;
+        match lyrics {
+            Ok(Some(document)) => {
+                // The attachment journal reconciles uncertain sends using the
+                // same operation ID on every retry, before track registration.
+                let patch = crate::metadata::prepare_patch(
+                    engine,
+                    op_id,
+                    crate::MediaEdit {
+                        patch: Default::default(),
+                        artwork: None,
+                        lyrics: Some(document),
+                    },
+                    cancel,
+                )
+                .await?;
+                patch.apply_to(&mut journal.info.metadata);
+            }
+            Ok(None) => {}
+            Err(error) if error.code == ErrorCode::InvalidInput => {
+                events.emit(
+                    context,
+                    EventData::Warning(ApiError::diagnostic(
+                        ErrorCode::InvalidInput,
+                        "Встроенный текст не удалось разобрать; музыка импортирована без текста.",
+                    )),
+                );
+            }
+            Err(error) => return Err(error),
+        }
+        journal.discover_lyrics = false;
+        save(engine, &journal).await?;
+    }
     let cover = incoming::prepare_cover(engine, &mut journal, cancel).await?;
     artwork::publish(
         engine,

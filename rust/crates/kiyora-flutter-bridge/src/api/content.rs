@@ -125,6 +125,20 @@ impl From<vault_domain::LyricsDocument> for Lyrics {
         }
     }
 }
+/// Explicitly inspect the original audio's tags without changing library metadata.
+pub async fn embedded_lyrics(
+    session_id: String,
+    track_id: String,
+    operation: &Operation,
+) -> Result<Option<Lyrics>, BridgeError> {
+    Ok(runtime()
+        .await?
+        .backend
+        .embedded_lyrics(id(&session_id)?, id(&track_id)?, &operation.token)
+        .await?
+        .map(Into::into))
+}
+
 pub async fn lyrics(
     session_id: String,
     track_id: String,

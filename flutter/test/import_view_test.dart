@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:kiyora/core/bridge/generated/api/edits.dart' as edits;
+import 'package:kiyora/core/bridge/generated/api/jobs.dart' as jobs;
 import 'package:kiyora/core/bridge/generated/frb_generated.dart';
 import 'package:kiyora/core/state/backend_controller.dart';
 import 'package:kiyora/features/imports/import_selection.dart';
@@ -12,12 +13,42 @@ import 'backend_controller_test.dart' show TestApi;
 import 'import_editor_test.dart' show EditorApi;
 import 'import_selection_test.dart' show MemoryDraftStore;
 
+class _ReviewApi extends EditorApi {
+  bool showReview = false;
+
+  @override
+  Future<List<jobs.Job>> crateApiJobsList({required String sessionId}) async =>
+      showReview
+      ? [
+          jobs.Job(
+            id: 'job-1',
+            state: jobs.JobState.succeeded,
+            completed: BigInt.one,
+            total: BigInt.one,
+            files: [
+              jobs.FileResult(
+                operationId: 'review-1',
+                review: jobs.ImportReview(
+                  title: 'Existing song',
+                  artist: 'Artist',
+                  album: 'Album',
+                  sizeBytes: BigInt.from(1200),
+                  duplicateTrackIds: ['existing-id'],
+                  possibleDuplicateTrackIds: [],
+                ),
+              ),
+            ],
+          ),
+        ]
+      : super.crateApiJobsList(sessionId: sessionId);
+}
+
 void main() {
   late EditorApi native;
   late BackendController backend;
   late ImportSelection selection;
   setUp(() {
-    native = EditorApi();
+    native = _ReviewApi();
     RustLib.initMock(api: native);
     backend = BackendController()..session = TestApi.session;
     selection = ImportSelection(backend, store: MemoryDraftStore());
@@ -96,11 +127,30 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Импорт подтверждён'), findsOneWidget);
-    await click(tester, find.text('Убрать из черновиков'));
+    await click(tester, find.byTooltip('Убрать из черновиков'));
     expect(selection.drafts, isEmpty);
     expect(native.discarded, 1);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('bulk import review gives a recoverable path for duplicates', (
+    tester,
+  ) async {
+    // This job has finished processing files but has not imported its duplicate.
+    // Review must remain visible with a way to choose it again for editing.
+    (native as _ReviewApi).showReview = true;
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    await click(tester, find.text('Проверка дубликатов'));
+    expect(find.text('Обработка завершена'), findsNothing);
+    expect(find.text('Existing song'), findsOneWidget);
+    expect(find.textContaining('Выберите тот же файл снова'), findsOneWidget);
+    expect(
+      find.byTooltip('Выбрать файл для проверки дубликата'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('cancelled wait keeps retry request and displays the error', (
@@ -152,8 +202,10 @@ void main() {
       await selection.prepare(selection.files.single);
       await tester.pumpWidget(page());
       await tester.pumpAndSettle();
-      await click(tester, find.text('Удалить обложку'));
-      expect(selection.drafts.single.clearArtwork, isTrue);
+      final removeCover = find.widgetWithText(TextButton, 'Удалить обложку');
+      await tester.ensureVisible(removeCover);
+      expect(tester.widget<TextButton>(removeCover).onPressed, isNull);
+      expect(selection.drafts.single.clearArtwork, isFalse);
       await click(tester, find.text('Исходная обложка'));
       expect(selection.drafts.single.clearArtwork, isFalse);
       await click(tester, find.text('Сохранить встроенный текст'));

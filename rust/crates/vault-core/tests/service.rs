@@ -2966,3 +2966,112 @@ async fn playlist_cover_recovers_lost_ack_and_survives_snapshot_and_portable_bac
     restored.shutdown().await.unwrap();
     second.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn raw_import_preserves_embedded_lyrics_and_prepared_clear_stays_cleared() {
+    for clear in [false, true] {
+        let (server, binding) = fixture().await;
+        let service = service(&server, binding, EventBus::default());
+        ready(&service).await;
+        let token = CancellationToken::new();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lyrics.mp3");
+        std::fs::copy("../../spec/test-vectors/audio/tone.mp3", &path).unwrap();
+        let metadata = vault_media::inspect(&path).unwrap().metadata;
+        let lyrics = vault_media::parse_lyrics("Первая строка\nSecond line", "plain").unwrap();
+        vault_media::write_tags(&path, &metadata, None, Some(&lyrics)).unwrap();
+        assert_eq!(
+            vault_media::embedded_lyrics(&path).unwrap(),
+            Some(lyrics.clone())
+        );
+        let original = std::fs::read(&path).unwrap();
+        let id = Uuid::new_v4();
+        let request = if clear {
+            service
+                .request(
+                    VaultRequest::PreviewImport {
+                        path: path.to_string_lossy().into_owned(),
+                        preview_id: id,
+                    },
+                    &token,
+                )
+                .await
+                .unwrap();
+            VaultRequest::ImportPrepared {
+                preview_id: id,
+                track_id: id,
+                source_id: id,
+                edit: Some(Box::new(MediaEdit {
+                    patch: MetadataPatch {
+                        clear_lyrics: true,
+                        ..Default::default()
+                    },
+                    artwork: None,
+                    lyrics: None,
+                })),
+                write_tags: false,
+                allow_duplicate: false,
+            }
+        } else {
+            VaultRequest::Import {
+                path: path.to_string_lossy().into_owned(),
+                track_id: id,
+                source_id: id,
+                op_id: id,
+                allow_duplicate: false,
+            }
+        };
+        if !clear {
+            server
+                .set_faults(Faults {
+                    lost_ack: true,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert!(service.request(request.clone(), &token).await.is_err());
+            server.set_faults(Faults::default()).unwrap();
+            service.request(VaultRequest::Sync, &token).await.unwrap();
+            // Recovery must use the staged copy, not the original file.
+            std::fs::remove_file(&path).unwrap();
+        }
+        let result = service.request(request.clone(), &token).await.unwrap();
+        assert!(matches!(result, VaultResponse::Command(c) if c.status == CommandStatus::Applied));
+        let state = service.reader().state().await.unwrap();
+        let reference = &state.tracks[&id].metadata.lyrics;
+        if clear {
+            assert!(
+                reference.is_none(),
+                "logical removal must not recover embedded lyrics"
+            );
+        } else {
+            let reference = reference
+                .as_ref()
+                .expect("raw import must publish embedded lyrics");
+            let transport = server.client().unwrap();
+            let file = transport
+                .message(binding.chat_id, reference.source.message_id, &token)
+                .await
+                .unwrap()
+                .unwrap()
+                .file
+                .unwrap();
+            let downloaded = transport.download(file, 0, 0, &token).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<LyricsDocument>(&std::fs::read(downloaded.path).unwrap())
+                    .unwrap(),
+                lyrics
+            );
+        }
+        let count = server.messages().unwrap().len();
+        service.request(request, &token).await.unwrap();
+        assert_eq!(
+            server.messages().unwrap().len(),
+            count,
+            "retry must not duplicate attachments"
+        );
+        if clear {
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+        }
+        service.shutdown().await.unwrap();
+    }
+}

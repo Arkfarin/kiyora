@@ -21,6 +21,7 @@ class BackendController extends ChangeNotifier {
   vault.Status? runtime;
   bool starting = true;
   bool busy = false;
+  bool get canCancel => busy && _operation != null;
   Object? error;
   final playback = ValueNotifier<api.Playback>(const api.Playback.idle());
   final queue = ValueNotifier<api.Queue?>(null);
@@ -351,6 +352,7 @@ class BackendController extends ChangeNotifier {
       action(() async {
         final operation = await auth.Operation.newInstance();
         _operation = operation;
+        notifyListeners(); // The wait is cancellable only once the handle exists.
         try {
           await command(operation);
         } finally {
@@ -417,6 +419,24 @@ class BackendController extends ChangeNotifier {
   });
   Future<void> reconnect() => action(() async {
     authorization = await auth.reconnect(sessionId: sessionId);
+    await _resubscribe();
+  });
+
+  /// Cancel an unfinished QR login before returning to phone entry. Reconnect
+  /// alone restores the same QR state from TDLib's persisted authorization.
+  Future<void> restartLogin() => action(() async {
+    final latest = await auth.status(sessionId: sessionId);
+    if (latest is auth.Authorization_Ready) {
+      authorization = latest;
+      await _resubscribe();
+      return;
+    }
+    if (latest is! auth.Authorization_QrConfirmation) {
+      authorization = latest;
+      return;
+    }
+    await auth.logout(sessionId: sessionId);
+    authorization = await auth.connect(sessionId: sessionId);
     await _resubscribe();
   });
   Future<void> synchronize() => operate((operation) async {
