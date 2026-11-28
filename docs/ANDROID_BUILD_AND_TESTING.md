@@ -117,6 +117,20 @@ NDK 28.2.13676358 (API 26 native target).
 The actual device and package acceptance steps below remain mandatory; neither
 the host visual renders nor the Rust cross-check proves Android startup.
 
+### Verification on 2026-11-29
+
+ARM64 and x86_64 debug APKs were built and verified independently, then an
+ARM64+x86_64 AAB was produced and checked. An isolated Android 15 x86_64
+emulator installed and launched the real application, created a disposable
+profile, restored it after force-stop and displayed the native Telegram login
+entry. Automated Flutter/Rust/FRB regression checks also passed.
+
+See [Android emulator QA — 29 November 2026](ANDROID_EMULATOR_QA_2026-11-29.md)
+for exact commands, screenshots, pass/fail evidence and remaining limitations.
+The emulator used 4 KiB kernel pages; a 16 KiB-page device test remains open.
+Release signing properties were absent, so the build artifacts available for
+direct installation are debug APKs.
+
 ## Device acceptance checklist
 
 Before a release, verify on Android 8+ and a modern Android version; include a

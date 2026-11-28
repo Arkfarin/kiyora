@@ -80,6 +80,7 @@ The Flutter application is located in [`flutter/`](flutter/). The native Cargo w
 For technical context, see the [Flutter migration notes](docs/FLUTTER_LINUX_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_LINUX_RELEASE.md). Verification scope and remaining checks are recorded in the [Linux testing notes](docs/FLUTTER_LINUX_TESTING.md).
 
 For Android prerequisites, APK/AAB packaging and the device verification checklist, see [Android build and testing](docs/ANDROID_BUILD_AND_TESTING.md).
+For actual Android 15 emulator installation results, screenshots, and remaining acceptance items, see [Android emulator QA (2026-11-29)](docs/ANDROID_EMULATOR_QA_2026-11-29.md).
 
 **No stable binaries or one-command setup are promised at this stage.**
 
