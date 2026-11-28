@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/offline.dart' as offline;
+import '../../core/bridge/generated/api/vault.dart' as vault;
 import '../../core/state/backend_controller.dart';
 import 'profile_menu.dart';
 
@@ -15,11 +16,13 @@ class SettingsView extends StatefulWidget {
     required this.themeMode,
     required this.onThemeChanged,
     this.onLogin,
+    this.mobile = false,
   });
   final BackendController backend;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeChanged;
   final VoidCallback? onLogin;
+  final bool mobile;
   @override
   State<SettingsView> createState() => _SettingsViewState();
 }
@@ -44,6 +47,7 @@ class _SettingsViewState extends State<SettingsView> {
   });
 
   Future<void> _chooseQuota() async {
+    final session = b.sessionId;
     final selected = await showDialog<int>(
       context: context,
       builder: (context) => SimpleDialog(
@@ -63,7 +67,10 @@ class _SettingsViewState extends State<SettingsView> {
         ],
       ),
     );
-    if (selected != null && mounted && !b.busy) {
+    if (selected != null &&
+        mounted &&
+        !b.busy &&
+        b.session?.sessionId == session) {
       await _loadCache(quota: BigInt.from(selected * 1024 * 1024 * 1024));
     }
   }
@@ -98,14 +105,16 @@ class _SettingsViewState extends State<SettingsView> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(widget.mobile ? 16 : 24),
           children: [
-            Text(
-              'Настройки',
-              style: Theme.of(context).textTheme.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 28),
+            if (!widget.mobile) ...[
+              Text(
+                'Настройки',
+                style: Theme.of(context).textTheme.headlineMedium
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 28),
+            ],
             _title('Аккаунт'),
             Text(
               'Выберите профиль или создайте новый. Медиатеки каждого профиля сохраняются отдельно.',
@@ -135,7 +144,7 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             ListTile(
               title: const Text('Подключиться снова'),
-              subtitle: Text(b.details?.connection ?? ''),
+              subtitle: Text(_connectionLabel(b.details?.connection)),
               trailing: const Icon(Icons.refresh),
               onTap: b.busy ? null : b.reconnect,
             ),
@@ -188,7 +197,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
               trailing: IconButton(
                 tooltip: 'Обновить размер кэша',
-                onPressed: b.busy ? null : _loadCache,
+                onPressed: b.busy || !b.hasLibrary ? null : _loadCache,
                 icon: const Icon(Icons.refresh),
               ),
             ),
@@ -199,9 +208,10 @@ class _SettingsViewState extends State<SettingsView> {
               onTap: b.busy || !b.hasLibrary ? null : _chooseQuota,
             ),
             TextButton(
-              onPressed: b.busy
+              onPressed: b.busy || !b.hasLibrary
                   ? null
                   : () async {
+                      final session = b.sessionId;
                       final confirmed = await showDialog<bool>(
                         context: context,
                         builder: (context) => AlertDialog(
@@ -221,14 +231,17 @@ class _SettingsViewState extends State<SettingsView> {
                           ],
                         ),
                       );
-                      if (confirmed == true) {
+                      if (confirmed == true &&
+                          mounted &&
+                          b.session?.sessionId == session) {
                         await b.operate((op) async {
                           await offline.clearUnpinned(
                             sessionId: b.sessionId,
                             operation: op,
                           );
                         });
-                        await _loadCache();
+                        if (mounted && b.session?.sessionId == session)
+                          await _loadCache();
                       }
                     },
               child: const Text('Очистить незакреплённые файлы'),
@@ -238,10 +251,7 @@ class _SettingsViewState extends State<SettingsView> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Синхронизировать библиотеку'),
-              subtitle: Text(
-                b.runtime?.mode.name ??
-                    'Статус подключения доступен после входа',
-              ),
+              subtitle: Text(_runtimeLabel(b.runtime?.mode)),
               trailing: const Icon(Icons.sync),
               onTap: b.busy ? null : b.synchronize,
             ),
@@ -279,6 +289,26 @@ class _SettingsViewState extends State<SettingsView> {
     ),
   );
 }
+
+String _connectionLabel(String? state) => switch (state) {
+  'ready' => 'Подключено',
+  'waiting_for_network' => 'Ожидание сети',
+  'connecting_to_proxy' => 'Подключение к прокси',
+  'connecting' => 'Подключение…',
+  'updating' => 'Обновление данных…',
+  'not_started' => 'Не подключено',
+  _ => 'Статус неизвестен',
+};
+
+String _runtimeLabel(vault.Mode? mode) => switch (mode) {
+  vault.Mode.authRequired => 'Требуется вход',
+  vault.Mode.discovering => 'Поиск медиатеки…',
+  vault.Mode.syncing => 'Синхронизация…',
+  vault.Mode.onlineReady => 'Медиатека подключена',
+  vault.Mode.reconnecting => 'Восстановление подключения…',
+  vault.Mode.degradedReadonly => 'Офлайн: только чтение',
+  null => 'Статус подключения доступен после входа',
+};
 
 String _fileSize(BigInt size) {
   final value = size.toDouble();

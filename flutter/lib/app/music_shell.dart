@@ -316,6 +316,7 @@ class _MusicShellState extends State<MusicShell> {
       ),
       Destination.settings => SettingsView(
         key: key,
+        mobile: mobile,
         backend: b,
         themeMode: widget.themeMode,
         onThemeChanged: widget.onThemeChanged,
