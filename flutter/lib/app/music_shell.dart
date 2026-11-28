@@ -23,6 +23,20 @@ import '../features/settings/profile_menu.dart';
 
 enum ContextPanel { playing, queue, lyrics }
 
+// A history entry has its own identity even when callers reuse const routes.
+// The mobile tab history can then associate detail pages with their origin.
+class _ShellNavigation extends MusicNavigation {
+  @override
+  void go(MusicLocation location) => super.go(
+    MusicLocation(
+      location.destination,
+      id: location.id,
+      title: location.title,
+      artist: location.artist,
+    ),
+  );
+}
+
 class MusicShell extends StatefulWidget {
   const MusicShell({
     super.key,
@@ -38,7 +52,7 @@ class MusicShell extends StatefulWidget {
 }
 
 class _MusicShellState extends State<MusicShell> {
-  final _navigation = MusicNavigation();
+  final _navigation = _ShellNavigation();
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _storage = PageStorageBucket();
@@ -48,12 +62,18 @@ class _MusicShellState extends State<MusicShell> {
   ContextPanel? _panel;
   Timer? _searchDelay;
   String _query = '';
+  final _tabHistory = Expando<int>();
+  int _mobileTab = 0;
+  LibraryFilter _mobileLibraryFilter = LibraryFilter.tracks;
+  LibraryFilter _mobileSearchFilter = LibraryFilter.tracks;
+  String _mobileLibraryQuery = '';
   BackendController get b => widget.backend;
   late final ImportSelection _imports;
   @override
   void initState() {
     super.initState();
     _imports = ImportSelection(b);
+    _navigation.addListener(_rememberMobileTab);
     b.commandResults.addListener(_command);
     b.addListener(_error);
   }
@@ -83,7 +103,30 @@ class _MusicShellState extends State<MusicShell> {
     super.didChangeDependencies();
     // Close a docked panel when it no longer fits; do not resurrect it
     // when the window grows again.
-    if (MediaQuery.sizeOf(context).width < 1200) _panel = null;
+    final width = MediaQuery.sizeOf(context).width;
+    if (width < 1200 || _isMobileLayout(width)) _panel = null;
+  }
+
+  bool _isMobileLayout(double width) =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      (defaultTargetPlatform != TargetPlatform.linux && width < 900);
+
+  void _rememberMobileTab() {
+    final location = _navigation.current;
+    _mobileTab = switch (location.destination) {
+      Destination.home => 0,
+      Destination.search => 1,
+      Destination.library => 2,
+      _ => _tabHistory[location] ?? _mobileTab,
+    };
+    _tabHistory[location] = _mobileTab;
+    if (_isMobileLayout(MediaQuery.sizeOf(context).width) &&
+        location.destination != Destination.search) {
+      _searchDelay?.cancel();
+      _query = _search.text;
+      _searchFocus.unfocus();
+    }
   }
 
   @override
@@ -91,6 +134,7 @@ class _MusicShellState extends State<MusicShell> {
     _searchDelay?.cancel();
     b.commandResults.removeListener(_command);
     b.removeListener(_error);
+    _navigation.removeListener(_rememberMobileTab);
     _navigation.dispose();
     _imports.dispose();
     _search.dispose();
@@ -99,7 +143,8 @@ class _MusicShellState extends State<MusicShell> {
   }
 
   void _openPanel(ContextPanel panel) {
-    if (MediaQuery.sizeOf(context).width >= 1200) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= 1200 && !_isMobileLayout(width)) {
       setState(() => _panel = _panel == panel ? null : panel);
     } else if (defaultTargetPlatform == TargetPlatform.linux) {
       if (_panel != null) setState(() => _panel = null);
@@ -152,8 +197,9 @@ class _MusicShellState extends State<MusicShell> {
   }
 
   void _openPlayer() {
+    final width = MediaQuery.sizeOf(context).width;
     if (defaultTargetPlatform == TargetPlatform.linux ||
-        MediaQuery.sizeOf(context).width >= 1200) {
+        (width >= 1200 && !_isMobileLayout(width))) {
       _openPanel(ContextPanel.playing);
       return;
     }
@@ -230,15 +276,23 @@ class _MusicShellState extends State<MusicShell> {
           ),
         ),
       };
-  Widget _content(MusicLocation location) {
+  Widget _content(MusicLocation location, {required bool mobile}) {
     final key = ValueKey(
-      '${location.destination}:${location.id}:${location.title}',
+      '${location.destination}:${location.id}:${location.title}:${location.artist}',
     );
     return switch (location.destination) {
       Destination.home => HomeView(
         key: key,
         backend: b,
         navigation: _navigation,
+        mobile: mobile,
+        onOpenLibraryTracks: mobile
+            ? () {
+                _mobileLibraryFilter = LibraryFilter.tracks;
+                _mobileLibraryQuery = '';
+                _selectMobileTab(2);
+              }
+            : null,
       ),
       Destination.imports => ImportView(
         key: key,
@@ -257,21 +311,131 @@ class _MusicShellState extends State<MusicShell> {
         backend: b,
         navigation: _navigation,
         location: location,
-        search: location.destination == Destination.search ? _query : '',
+        mobile: mobile,
+        externalSearch: mobile && location.destination == Destination.search,
+        initialFilter: mobile && location.destination == Destination.search
+            ? _mobileSearchFilter
+            : mobile && location.destination == Destination.library
+            ? _mobileLibraryFilter
+            : LibraryFilter.tracks,
+        search: location.destination == Destination.search
+            ? _query
+            : mobile && location.destination == Destination.library
+            ? _mobileLibraryQuery
+            : '',
+        onFilterChanged: mobile
+            ? (filter) {
+                if (location.destination == Destination.search) {
+                  _mobileSearchFilter = filter;
+                } else if (location.destination == Destination.library) {
+                  _mobileLibraryFilter = filter;
+                }
+              }
+            : null,
+        onLocalSearchChanged:
+            mobile && location.destination == Destination.library
+            ? (query) => _mobileLibraryQuery = query
+            : null,
       ),
     };
   }
 
   void _go(Destination destination) =>
       _navigation.go(MusicLocation(destination));
+
+  void _selectMobileTab(int index, {bool focusSearch = false}) {
+    final destination = [
+      Destination.home,
+      Destination.search,
+      Destination.library,
+    ][index];
+    if (_navigation.current.destination == destination) {
+      if (destination == Destination.search) _searchFocus.requestFocus();
+      return;
+    }
+    // Root tabs replace the previous tab's history. Android Back then returns
+    // to Home, while detail pages keep their normal local history.
+    _navigation.reset();
+    if (destination != Destination.home) _go(destination);
+    if (destination == Destination.search &&
+        (focusSearch || _search.text.isEmpty)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _navigation.current.destination == Destination.search) {
+          _searchFocus.requestFocus();
+        }
+      });
+    }
+  }
+
+  void _changeSearch(String value, {required bool mobile}) {
+    _searchDelay?.cancel();
+    _searchDelay = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted) return;
+      setState(() => _query = value);
+      if (!mobile && _navigation.current.destination != Destination.search) {
+        _go(Destination.search);
+      }
+    });
+  }
+
+  Widget _mobileSearchField() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+    child: ValueListenableBuilder(
+      valueListenable: _search,
+      builder: (context, value, _) => TextField(
+        key: const ValueKey('mobile-global-search'),
+        controller: _search,
+        focusNode: _searchFocus,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          prefixIcon: const Icon(Icons.search),
+          hintText: 'Что хотите послушать?',
+          isDense: true,
+          suffixIcon: value.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Очистить поиск',
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _searchDelay?.cancel();
+                    _search.clear();
+                    setState(() => _query = '');
+                  },
+                ),
+        ),
+        onChanged: (value) => _changeSearch(value, mobile: true),
+        onSubmitted: (value) {
+          _searchDelay?.cancel();
+          setState(() => _query = value);
+          _searchFocus.unfocus();
+        },
+      ),
+    ),
+  );
+
+  String _mobileTitle(MusicLocation location) => switch (location.destination) {
+    Destination.home => 'KIYORA',
+    Destination.search => 'Поиск',
+    Destination.settings => 'Настройки',
+    Destination.imports => 'Импорт',
+    _ => 'Медиатека',
+  };
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _navigation,
     builder: (context, _) {
       final location = _navigation.current;
       final width = MediaQuery.sizeOf(context).width;
-      final mobile =
-          defaultTargetPlatform != TargetPlatform.linux && width < 900;
+      final mobile = _isMobileLayout(width);
+      final rail = mobile && width >= 700;
+      final short = MediaQuery.sizeOf(context).height < 480;
+      final keyboard = mobile && MediaQuery.viewInsetsOf(context).bottom > 0;
+      final mobileRoot = [
+        Destination.home,
+        Destination.search,
+        Destination.library,
+      ].contains(location.destination);
       final compactLibrary = _compactLibrary || (!mobile && width < 1040);
       final forcedCompact = !mobile && width < 1040;
       final tokens = Theme.of(context).extension<KiyoraColors>()!;
@@ -282,7 +446,10 @@ class _MusicShellState extends State<MusicShell> {
         openQueue: () => _openPanel(ContextPanel.queue),
         openLyrics: () => _openPanel(ContextPanel.lyrics),
       );
-      final content = PageStorage(bucket: _storage, child: _content(location));
+      final content = PageStorage(
+        bucket: _storage,
+        child: _content(location, mobile: mobile),
+      );
       return PopScope(
         canPop: !_navigation.canBack,
         onPopInvokedWithResult: (didPop, _) {
@@ -294,8 +461,12 @@ class _MusicShellState extends State<MusicShell> {
             if (event is! KeyDownEvent) return KeyEventResult.ignored;
             if (HardwareKeyboard.instance.isControlPressed &&
                 event.logicalKey == LogicalKeyboardKey.keyK) {
-              _go(Destination.search);
-              _searchFocus.requestFocus();
+              if (mobile) {
+                _selectMobileTab(1, focusSearch: true);
+              } else {
+                _go(Destination.search);
+                _searchFocus.requestFocus();
+              }
               return KeyEventResult.handled;
             }
             if (HardwareKeyboard.instance.isAltPressed &&
@@ -321,13 +492,20 @@ class _MusicShellState extends State<MusicShell> {
           child: Scaffold(
             appBar: mobile
                 ? AppBar(
-                    leading: _navigation.canBack
+                    automaticallyImplyLeading: false,
+                    leading: !mobileRoot && _navigation.canBack
                         ? BackButton(onPressed: _navigation.back)
                         : null,
-                    title: const Text(
-                      'KIYORA',
-                      style: TextStyle(fontWeight: FontWeight.w900),
+                    title: Text(
+                      _mobileTitle(location),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
+                    bottom: location.destination == Destination.search
+                        ? PreferredSize(
+                            preferredSize: const Size.fromHeight(68),
+                            child: _mobileSearchField(),
+                          )
+                        : null,
                     actions: [
                       ProfileMenuButton(
                         backend: b,
@@ -340,12 +518,43 @@ class _MusicShellState extends State<MusicShell> {
                 : null,
             body: SafeArea(
               top: !mobile,
-              bottom: !mobile,
+              bottom: !mobile || rail,
               child: mobile
                   ? Column(
                       children: [
-                        Expanded(child: content),
-                        player,
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (rail && !keyboard)
+                                NavigationRail(
+                                  selectedIndex: _mobileTab,
+                                  onDestinationSelected: _selectMobileTab,
+                                  labelType: short
+                                      ? NavigationRailLabelType.none
+                                      : NavigationRailLabelType.all,
+                                  backgroundColor: tokens.canvas,
+                                  destinations: const [
+                                    NavigationRailDestination(
+                                      icon: Icon(Icons.home_outlined),
+                                      selectedIcon: Icon(Icons.home),
+                                      label: Text('Главная'),
+                                    ),
+                                    NavigationRailDestination(
+                                      icon: Icon(Icons.search),
+                                      label: Text('Поиск'),
+                                    ),
+                                    NavigationRailDestination(
+                                      icon: Icon(Icons.library_music_outlined),
+                                      selectedIcon: Icon(Icons.library_music),
+                                      label: Text('Медиатека'),
+                                    ),
+                                  ],
+                                ),
+                              Expanded(child: content),
+                            ],
+                          ),
+                        ),
+                        if (!keyboard) player,
                       ],
                     )
                   : Column(
@@ -401,20 +610,8 @@ class _MusicShellState extends State<MusicShell> {
                                           hintText: 'Что хотите послушать?',
                                           isDense: true,
                                         ),
-                                        onChanged: (value) {
-                                          _searchDelay?.cancel();
-                                          _searchDelay = Timer(
-                                            const Duration(milliseconds: 220),
-                                            () {
-                                              setState(() => _query = value);
-                                              if (_navigation
-                                                      .current
-                                                      .destination !=
-                                                  Destination.search)
-                                                _go(Destination.search);
-                                            },
-                                          );
-                                        },
+                                        onChanged: (value) =>
+                                            _changeSearch(value, mobile: false),
                                       ),
                                     ),
                                   ),
@@ -593,21 +790,11 @@ class _MusicShellState extends State<MusicShell> {
                       ],
                     ),
             ),
-            bottomNavigationBar: !mobile
+            bottomNavigationBar: !mobile || rail || keyboard
                 ? null
                 : NavigationBar(
-                    selectedIndex: switch (location.destination) {
-                      Destination.home => 0,
-                      Destination.search => 1,
-                      _ => 2,
-                    },
-                    onDestinationSelected: (i) => _go(
-                      [
-                        Destination.home,
-                        Destination.search,
-                        Destination.library,
-                      ][i],
-                    ),
+                    selectedIndex: _mobileTab,
+                    onDestinationSelected: _selectMobileTab,
                     destinations: const [
                       NavigationDestination(
                         icon: Icon(Icons.home_outlined),

@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api/edits.dart' as edits;
 import '../../core/bridge/generated/api.dart' as api;
@@ -8,9 +9,17 @@ import '../../core/widgets/artwork.dart';
 import '../library/track_actions.dart';
 
 class HomeView extends StatefulWidget {
-  const HomeView({super.key, required this.backend, required this.navigation});
+  const HomeView({
+    super.key,
+    required this.backend,
+    required this.navigation,
+    this.mobile = false,
+    this.onOpenLibraryTracks,
+  });
   final BackendController backend;
   final MusicNavigation navigation;
+  final bool mobile;
+  final VoidCallback? onOpenLibraryTracks;
   @override
   State<HomeView> createState() => _HomeViewState();
 }
@@ -91,42 +100,97 @@ class _HomeViewState extends State<HomeView> {
           : hour < 18
           ? 'Добрый день'
           : 'Добрый вечер';
-      return CustomScrollView(
+      final scroll = CustomScrollView(
         key: const PageStorageKey('home'),
+        physics: widget.mobile ? const AlwaysScrollableScrollPhysics() : null,
         slivers: [
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            padding: widget.mobile
+                ? const EdgeInsets.fromLTRB(16, 12, 16, 16)
+                : const EdgeInsets.fromLTRB(24, 24, 24, 16),
             sliver: SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      const Chip(label: Text('Музыка')),
-                      ActionChip(
-                        label: const Text('Любимые композиции'),
-                        onPressed: () =>
-                            nav.go(const MusicLocation(Destination.favorites)),
-                      ),
-                      ActionChip(
-                        label: const Text('Добавить музыку'),
-                        onPressed: () =>
-                            nav.go(const MusicLocation(Destination.imports)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    greeting,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+                  if (widget.mobile) ...[
+                    Text(
+                      greeting,
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 16),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final width = constraints.maxWidth < 280
+                            ? constraints.maxWidth
+                            : (constraints.maxWidth - 8) / 2;
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _QuickLink(
+                              width: width,
+                              title: 'Любимое',
+                              icon: Icons.favorite,
+                              onTap: () => nav.go(
+                                const MusicLocation(Destination.favorites),
+                              ),
+                            ),
+                            _QuickLink(
+                              width: width,
+                              title: 'Добавить музыку',
+                              icon: Icons.add,
+                              onTap: () => nav.go(
+                                const MusicLocation(Destination.imports),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    if (data.playlists.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      Text(
+                        'Ваши плейлисты',
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ] else ...[
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        const Chip(label: Text('Музыка')),
+                        ActionChip(
+                          label: const Text('Любимые композиции'),
+                          onPressed: () => nav.go(
+                            const MusicLocation(Destination.favorites),
+                          ),
+                        ),
+                        ActionChip(
+                          label: const Text('Добавить музыку'),
+                          onPressed: () =>
+                              nav.go(const MusicLocation(Destination.imports)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      greeting,
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final columns = constraints.maxWidth > 750 ? 3 : 2;
+                      final columns =
+                          widget.mobile && constraints.maxWidth < 280
+                          ? 1
+                          : constraints.maxWidth > 750
+                          ? 3
+                          : 2;
                       final width =
                           (constraints.maxWidth - 8 * (columns - 1)) / columns;
                       return Wrap(
@@ -138,10 +202,12 @@ class _HomeViewState extends State<HomeView> {
                               width: width,
                               height: 64,
                               child: Material(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(4),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(
+                                  widget.mobile ? 12 : 4,
+                                ),
                                 clipBehavior: Clip.antiAlias,
                                 child: InkWell(
                                   onTap: () => nav.go(
@@ -153,9 +219,9 @@ class _HomeViewState extends State<HomeView> {
                                   ),
                                   child: Row(
                                     children: [
-                                      const SizedBox.square(
-                                        dimension: 64,
-                                        child: Icon(
+                                      SizedBox.square(
+                                        dimension: widget.mobile ? 48 : 64,
+                                        child: const Icon(
                                           Icons.playlist_play,
                                           size: 28,
                                         ),
@@ -200,7 +266,9 @@ class _HomeViewState extends State<HomeView> {
             _tracks(
               'В вашей медиатеке',
               data.tracks,
-              open: () => nav.go(const MusicLocation(Destination.library)),
+              open:
+                  widget.onOpenLibraryTracks ??
+                  () => nav.go(const MusicLocation(Destination.library)),
             ),
           if (data.albums.isNotEmpty)
             _collection(
@@ -211,6 +279,7 @@ class _HomeViewState extends State<HomeView> {
                       title: album.title,
                       subtitle: album.artist,
                       icon: Icons.album_outlined,
+                      mobile: widget.mobile,
                       onTap: () => nav.go(
                         MusicLocation(
                           Destination.album,
@@ -231,6 +300,7 @@ class _HomeViewState extends State<HomeView> {
                       title: artist.name,
                       subtitle: 'Исполнитель',
                       icon: Icons.person_outline,
+                      mobile: widget.mobile,
                       round: true,
                       onTap: () => nav.go(
                         MusicLocation(
@@ -258,10 +328,12 @@ class _HomeViewState extends State<HomeView> {
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
                         ),
+                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 12),
                       const Text(
                         'Добавьте файлы — KIYORA сохранит их в вашей библиотеке Telegram.',
+                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
                       FilledButton.icon(
@@ -278,6 +350,19 @@ class _HomeViewState extends State<HomeView> {
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       );
+      return widget.mobile
+          ? RefreshIndicator(
+              onRefresh: () async {
+                _refresh();
+                try {
+                  await _data;
+                } catch (_) {
+                  // FutureBuilder presents a retry action for this failure.
+                }
+              },
+              child: scroll,
+            )
+          : scroll;
     },
   );
   Widget _tracks(String title, List<api.Track> tracks, {VoidCallback? open}) =>
@@ -286,6 +371,7 @@ class _HomeViewState extends State<HomeView> {
           _TrackCard(
             backend: widget.backend,
             track: tracks[i],
+            mobile: widget.mobile,
             onTap: () =>
                 widget.backend.play(tracks.map((t) => t.id).toList(), i),
             onMenu: () => showTrackActions(
@@ -303,15 +389,16 @@ class _HomeViewState extends State<HomeView> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: EdgeInsets.symmetric(
+                  horizontal: widget.mobile ? 16 : 24,
+                ),
                 child: Row(
                   children: [
                     Expanded(
                       child: Text(
                         title,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
                     if (open != null)
@@ -324,8 +411,12 @@ class _HomeViewState extends State<HomeView> {
               ),
               const SizedBox(height: 12),
               SizedBox(
-                height: 236,
+                height: widget.mobile
+                    ? 164 + MediaQuery.textScalerOf(context).scale(38)
+                    : 236,
                 child: ListView.separated(
+                  key: PageStorageKey('home-collection:$title'),
+                  primary: false,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   scrollDirection: Axis.horizontal,
                   itemCount: cards.length,
@@ -337,6 +428,53 @@ class _HomeViewState extends State<HomeView> {
           ),
         ),
       );
+}
+
+class _QuickLink extends StatelessWidget {
+  const _QuickLink({
+    required this.width,
+    required this.title,
+    required this.icon,
+    required this.onTap,
+  });
+  final double width;
+  final String title;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 64),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(icon, color: colors.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _HomeData {
@@ -360,10 +498,12 @@ class _TrackCard extends StatefulWidget {
     required this.track,
     required this.onTap,
     required this.onMenu,
+    required this.mobile,
   });
   final BackendController backend;
   final api.Track track;
   final VoidCallback onTap, onMenu;
+  final bool mobile;
   @override
   State<_TrackCard> createState() => _TrackCardState();
 }
@@ -375,16 +515,16 @@ class _TrackCardState extends State<_TrackCard> {
     onEnter: (_) => setState(() => _hover = true),
     onExit: (_) => setState(() => _hover = false),
     child: SizedBox(
-      width: 176,
+      width: widget.mobile ? 144 : 176,
       child: Material(
         color: _hover
             ? Theme.of(context).colorScheme.surfaceContainerHighest
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(widget.mobile ? 12 : 6),
         child: InkWell(
           onTap: widget.onTap,
           onLongPress: widget.onMenu,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(widget.mobile ? 12 : 6),
           child: Padding(
             padding: const EdgeInsets.all(8),
             child: Column(
@@ -396,9 +536,19 @@ class _TrackCardState extends State<_TrackCard> {
                       sessionId: widget.backend.sessionId,
                       trackId: widget.track.id,
                       digest: widget.track.artworkDigest,
-                      size: 160,
+                      size: widget.mobile ? 128 : 160,
                     ),
-                    if (_hover)
+                    if (widget.mobile)
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: IconButton.filledTonal(
+                          tooltip: 'Действия с композицией',
+                          onPressed: widget.onMenu,
+                          icon: const Icon(Icons.more_horiz),
+                        ),
+                      )
+                    else if (_hover)
                       Positioned(
                         right: 8,
                         bottom: 8,
@@ -438,15 +588,16 @@ class _CatalogCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.onTap,
+    required this.mobile,
     this.round = false,
   });
   final String title, subtitle;
   final IconData icon;
   final VoidCallback onTap;
-  final bool round;
+  final bool round, mobile;
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 176,
+    width: mobile ? 144 : 176,
     child: InkWell(
       onTap: onTap,
       child: Padding(
@@ -455,11 +606,14 @@ class _CatalogCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 160,
-              height: 160,
+              width: mobile ? 128 : 160,
+              height: mobile ? 128 : 160,
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 shape: round ? BoxShape.circle : BoxShape.rectangle,
+                borderRadius: round
+                    ? null
+                    : BorderRadius.circular(mobile ? 12 : 0),
               ),
               child: Icon(icon, size: 64),
             ),

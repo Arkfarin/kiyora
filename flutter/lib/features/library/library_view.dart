@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
+
 import '../../core/bridge/generated/api/content.dart' as content;
 import '../../core/bridge/generated/api/edits.dart' as edits;
 import '../../core/bridge/generated/api.dart' as api;
@@ -27,12 +29,19 @@ class LibraryView extends StatefulWidget {
     required this.location,
     this.initialFilter = LibraryFilter.tracks,
     this.search = '',
+    this.mobile = false,
+    this.externalSearch = false,
+    this.onFilterChanged,
+    this.onLocalSearchChanged,
   });
   final BackendController backend;
   final MusicNavigation navigation;
   final MusicLocation location;
   final LibraryFilter initialFilter;
   final String search;
+  final bool mobile, externalSearch;
+  final ValueChanged<LibraryFilter>? onFilterChanged;
+  final ValueChanged<String>? onLocalSearchChanged;
   @override
   State<LibraryView> createState() => _LibraryViewState();
 }
@@ -41,6 +50,10 @@ class _LibraryViewState extends State<LibraryView> {
   late LibraryFilter _filter;
   late final PagedQuery<Object> _page;
   late final TextEditingController _search;
+  final _mobileScroll = ScrollController(keepScrollOffset: false);
+  PageStorageBucket? _storage;
+  bool _restoreScroll = true;
+  int _requestVersion = 0;
   Timer? _debounce;
   String _query = '';
   BigInt? _total;
@@ -64,29 +77,79 @@ class _LibraryViewState extends State<LibraryView> {
   @override
   void didUpdateWidget(LibraryView old) {
     super.didUpdateWidget(old);
-    if (old.search != widget.search) {
+    if ((!widget.mobile || widget.externalSearch) &&
+        old.search != widget.search &&
+        _query != widget.search) {
+      _debounce?.cancel();
       _query = widget.search;
       _search.text = _query;
-      _refresh();
+      _resetResults();
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _storage = PageStorage.maybeOf(context);
+  }
+
+  Object get _scrollId => (
+    widget.location.destination,
+    widget.location.id,
+    widget.location.title,
+    widget.location.artist,
+    _filter,
+    _query,
+  );
+
+  void _restoreMobileScroll() {
+    if (!widget.mobile || !_restoreScroll || _page.loading) return;
+    _restoreScroll = false;
+    final id = _scrollId;
+    final offset = _storage?.readState(context, identifier: id);
+    if (offset is! double || offset == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _scrollId != id || !_mobileScroll.hasClients) return;
+      _mobileScroll.jumpTo(
+        offset.clamp(0.0, _mobileScroll.position.maxScrollExtent),
+      );
+    });
+  }
+
+  void _resetResults() {
+    _restoreScroll = false;
+    // A global query can arrive in didUpdateWidget. Scrolling there would
+    // notify the AppBar while it is building.
+    final id = _scrollId;
+    if (widget.mobile) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollId == id && _mobileScroll.hasClients) {
+          _mobileScroll.jumpTo(0);
+        }
+      });
+    }
+    _refresh();
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _mobileScroll.dispose();
     b.libraryRevision.removeListener(_refresh);
     _page.dispose();
     _search.dispose();
     super.dispose();
   }
 
-  void _refresh() {
+  Future<void> _refresh() {
+    _requestVersion++;
     _total = null;
-    _page.reset();
+    return _page.reset();
   }
 
   Future<List<Object>> _fetch(int offset, int limit) async {
     final location = widget.location;
+    final version = _requestVersion;
     switch (location.destination) {
       case Destination.playlist:
         final page = await edits.playlist(
@@ -96,7 +159,7 @@ class _LibraryViewState extends State<LibraryView> {
           offset: offset,
           limit: limit,
         );
-        _total = page?.total;
+        if (mounted && version == _requestVersion) _total = page?.total;
         return page?.items ?? [];
       case Destination.album:
       case Destination.artist:
@@ -116,7 +179,7 @@ class _LibraryViewState extends State<LibraryView> {
           offset: offset,
           limit: limit,
         );
-        _total = page.total;
+        if (mounted && version == _requestVersion) _total = page.total;
         return page.tracks;
       default:
         return switch (_filter) {
@@ -156,169 +219,316 @@ class _LibraryViewState extends State<LibraryView> {
     Destination.favorites => 'Любимые композиции',
     _ => 'Моя медиатека',
   };
+
+  Widget _filterChip(LibraryFilter filter) => ChoiceChip(
+    label: Text(filterLabel(filter)),
+    selected: _filter == filter,
+    onSelected: (_) {
+      if (_filter == filter) return;
+      setState(() => _filter = filter);
+      widget.onFilterChanged?.call(filter);
+      if (widget.mobile && !widget.externalSearch) {
+        _debounce?.cancel();
+        _query = _search.text;
+      }
+      _resetResults();
+    },
+  );
+
+  Widget _emptyState(BuildContext context) {
+    final nav = widget.navigation;
+    final destination = widget.location.destination;
+    var title = 'Здесь появится ваша музыка';
+    var description = 'Импортируйте музыку или синхронизируйте библиотеку.';
+    var actionLabel = 'Добавить музыку';
+    VoidCallback? action = () =>
+        nav.go(const MusicLocation(Destination.imports));
+    if (_query.isNotEmpty) {
+      title = 'Ничего не найдено';
+      description = 'Попробуйте другое название или исполнителя.';
+      action = null;
+    } else if (widget.mobile) {
+      if (destination == Destination.search) {
+        title = 'Найдите свою музыку';
+        description = 'Введите название композиции, альбома или исполнителя.';
+        action = null;
+      } else if (destination == Destination.favorites) {
+        title = 'Пока нет любимых композиций';
+        description =
+            'Добавляйте понравившиеся треки, чтобы быстро найти их здесь.';
+        actionLabel = 'Открыть медиатеку';
+        action = () => nav.go(const MusicLocation(Destination.library));
+      } else if (destination == Destination.playlist) {
+        title = 'Плейлист пока пуст';
+        description =
+            'Добавьте композиции из своей медиатеки через меню трека.';
+        actionLabel = 'Открыть медиатеку';
+        action = () => nav.go(const MusicLocation(Destination.library));
+      } else if (destination == Destination.library &&
+          _filter == LibraryFilter.playlists) {
+        title = 'Создайте первый плейлист';
+        description = 'Соберите любимую музыку в собственную подборку.';
+        actionLabel = 'Создать плейлист';
+        action = () => createPlaylist(context, b, nav);
+      }
+    }
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              destination == Destination.favorites
+                  ? Icons.favorite_outline
+                  : destination == Destination.search
+                  ? Icons.search
+                  : Icons.library_music_outlined,
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(description, textAlign: TextAlign.center),
+            if (action != null)
+              TextButton(onPressed: action, child: Text(actionLabel)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _page,
-    builder: (context, _) => CustomScrollView(
-      key: PageStorageKey(
-        '${widget.location.destination}:${widget.location.id}:${widget.location.title}:$_filter',
-      ),
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_detail)
-                  _detailHeader(context)
-                else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _title,
-                          style: Theme.of(context).textTheme.headlineMedium
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Создать плейлист',
-                        onPressed: () =>
-                            createPlaylist(context, b, widget.navigation),
-                        icon: const Icon(Icons.add),
-                      ),
-                      IconButton(
-                        tooltip: 'Импорт музыки',
-                        onPressed: () => widget.navigation.go(
-                          const MusicLocation(Destination.imports),
-                        ),
-                        icon: const Icon(Icons.file_upload_outlined),
-                      ),
-                    ],
-                  ),
-                const SizedBox(height: 16),
-                if (!_detail &&
-                    (MediaQuery.sizeOf(context).width < 900 ||
-                        widget.location.destination != Destination.search))
-                  TextField(
-                    controller: _search,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: 'Что хотите послушать?',
-                    ),
-                    onChanged: (value) {
-                      _debounce?.cancel();
-                      _debounce = Timer(const Duration(milliseconds: 220), () {
-                        _query = value;
-                        _refresh();
-                      });
-                    },
-                  ),
-                if (!_detail) ...[
-                  const SizedBox(height: 16),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final filter in LibraryFilter.values)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(filterLabel(filter)),
-                              selected: _filter == filter,
-                              onSelected: (_) {
-                                setState(() => _filter = filter);
-                                _refresh();
-                              },
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-                if (_page.loading)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 16),
-                    child: LinearProgressIndicator(),
-                  ),
-                if (_page.error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_page.error.toString()),
-                        TextButton(
-                          onPressed: _page.reset,
-                          child: const Text('Повторить загрузку'),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
+    builder: (context, _) {
+      _restoreMobileScroll();
+      final scroll = CustomScrollView(
+        key: PageStorageKey(
+          '${widget.location.destination}:${widget.location.id}:${widget.location.title}:${widget.location.artist}:$_filter',
         ),
-        if (_page.firstOffset > 0)
+        controller: widget.mobile ? _mobileScroll : null,
+        physics: widget.mobile ? const AlwaysScrollableScrollPhysics() : null,
+        keyboardDismissBehavior: widget.mobile
+            ? ScrollViewKeyboardDismissBehavior.onDrag
+            : ScrollViewKeyboardDismissBehavior.manual,
+        slivers: [
           SliverToBoxAdapter(
-            child: TextButton(
-              onPressed: _page.previous,
-              child: const Text('Предыдущие композиции'),
-            ),
-          ),
-        if (_page.items.isEmpty && !_page.loading && _page.error == null)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.library_music_outlined, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      _query.isEmpty
-                          ? 'Здесь появится ваша музыка'
-                          : 'Ничего не найдено',
-                      style: Theme.of(context).textTheme.titleLarge,
+            child: Padding(
+              padding: widget.mobile
+                  ? const EdgeInsets.fromLTRB(16, 12, 16, 12)
+                  : const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_detail)
+                    _detailHeader(context)
+                  else if (!widget.mobile)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _title,
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Создать плейлист',
+                          onPressed: () =>
+                              createPlaylist(context, b, widget.navigation),
+                          icon: const Icon(Icons.add),
+                        ),
+                        IconButton(
+                          tooltip: 'Импорт музыки',
+                          onPressed: () => widget.navigation.go(
+                            const MusicLocation(Destination.imports),
+                          ),
+                          icon: const Icon(Icons.file_upload_outlined),
+                        ),
+                      ],
+                    ),
+                  if (widget.mobile &&
+                      widget.location.destination == Destination.library) ...[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ActionChip(
+                          avatar: const Icon(Icons.favorite_outline, size: 20),
+                          label: const Text('Любимое'),
+                          onPressed: () => widget.navigation.go(
+                            const MusicLocation(Destination.favorites),
+                          ),
+                        ),
+                        ActionChip(
+                          avatar: const Icon(Icons.add, size: 20),
+                          label: const Text('Плейлист'),
+                          onPressed: () =>
+                              createPlaylist(context, b, widget.navigation),
+                        ),
+                        ActionChip(
+                          avatar: const Icon(
+                            Icons.file_upload_outlined,
+                            size: 20,
+                          ),
+                          label: const Text('Импорт'),
+                          onPressed: () => widget.navigation.go(
+                            const MusicLocation(Destination.imports),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      _query.isEmpty
-                          ? 'Импортируйте музыку или синхронизируйте библиотеку.'
-                          : 'Попробуйте другое название или исполнителя.',
-                    ),
-                    if (_query.isEmpty)
-                      TextButton(
-                        onPressed: () => widget.navigation.go(
-                          const MusicLocation(Destination.imports),
+                  ],
+                  if (!widget.mobile || _detail) const SizedBox(height: 16),
+                  if (!_detail &&
+                      !widget.externalSearch &&
+                      (MediaQuery.sizeOf(context).width < 900 ||
+                          widget.mobile ||
+                          widget.location.destination != Destination.search))
+                    ValueListenableBuilder(
+                      valueListenable: _search,
+                      builder: (context, value, _) => TextField(
+                        controller: _search,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search),
+                          hintText: widget.mobile
+                              ? 'Поиск в медиатеке'
+                              : 'Что хотите послушать?',
+                          suffixIcon: widget.mobile && value.text.isNotEmpty
+                              ? IconButton(
+                                  tooltip: 'Очистить поиск в медиатеке',
+                                  onPressed: () {
+                                    _debounce?.cancel();
+                                    _search.clear();
+                                    _query = '';
+                                    widget.onLocalSearchChanged?.call('');
+                                    _resetResults();
+                                  },
+                                  icon: const Icon(Icons.close),
+                                )
+                              : null,
                         ),
-                        child: const Text('Добавить музыку'),
+                        onChanged: (value) {
+                          widget.onLocalSearchChanged?.call(value);
+                          _debounce?.cancel();
+                          _debounce = Timer(
+                            const Duration(milliseconds: 220),
+                            () {
+                              _query = value;
+                              _resetResults();
+                            },
+                          );
+                        },
+                        onSubmitted: (value) {
+                          _debounce?.cancel();
+                          _query = value;
+                          _resetResults();
+                          if (widget.mobile) FocusScope.of(context).unfocus();
+                        },
+                      ),
+                    ),
+                  if (!_detail) ...[
+                    SizedBox(height: widget.externalSearch ? 0 : 16),
+                    if (widget.mobile)
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          for (final filter in LibraryFilter.values)
+                            _filterChip(filter),
+                        ],
+                      )
+                    else
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (final filter in LibraryFilter.values)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: _filterChip(filter),
+                              ),
+                          ],
+                        ),
                       ),
                   ],
+                  if (_page.loading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (_page.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_page.error.toString()),
+                          TextButton(
+                            onPressed: _page.reset,
+                            child: const Text('Повторить загрузку'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (_page.firstOffset > 0)
+            SliverToBoxAdapter(
+              child: TextButton(
+                onPressed: _page.previous,
+                child: const Text('Предыдущие композиции'),
+              ),
+            ),
+          if (_page.items.isEmpty && !_page.loading && _page.error == null)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _emptyState(context),
+            ),
+          SliverList.builder(
+            itemCount: _page.items.length,
+            itemBuilder: (context, index) => _row(_page.items[index], index),
+          ),
+          if (_page.hasMore && _page.items.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextButton(
+                  onPressed: _page.loading ? null : _page.next,
+                  child: const Text('Показать ещё'),
                 ),
               ),
             ),
-          ),
-        SliverList.builder(
-          itemCount: _page.items.length,
-          itemBuilder: (context, index) => _row(_page.items[index], index),
-        ),
-        if (_page.hasMore && _page.items.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextButton(
-                onPressed: _page.loading ? null : _page.next,
-                child: const Text('Показать ещё'),
-              ),
-            ),
-          ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
-      ],
-    ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      );
+      return widget.mobile
+          ? NotificationListener<ScrollUpdateNotification>(
+              onNotification: (notification) {
+                if (notification.depth == 0 &&
+                    !_restoreScroll &&
+                    !_page.loading) {
+                  _storage?.writeState(
+                    context,
+                    notification.metrics.pixels,
+                    identifier: _scrollId,
+                  );
+                }
+                return false;
+              },
+              child: RefreshIndicator(onRefresh: _refresh, child: scroll),
+            )
+          : scroll;
+    },
   );
 
   Widget _detailHeader(BuildContext context) {
@@ -328,15 +538,15 @@ class _LibraryViewState extends State<LibraryView> {
         : first is edits.PlaylistEntry
         ? first.track
         : null;
-    final narrow = MediaQuery.sizeOf(context).width < 700;
+    final narrow =
+        MediaQuery.sizeOf(context).width < (widget.mobile ? 800 : 700);
     final title = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           _title,
-          style: Theme.of(
-            context,
-          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w900),
+          style: Theme.of(context).textTheme.headlineLarge
+              ?.copyWith(fontWeight: FontWeight.w900),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
         ),
@@ -399,6 +609,7 @@ class _LibraryViewState extends State<LibraryView> {
       return TrackRow(
         backend: b,
         track: track,
+        mobile: widget.mobile,
         onPlay: () => _play(index),
         onMenu: (anchor) => showTrackActions(
           context,
@@ -433,7 +644,10 @@ class _LibraryViewState extends State<LibraryView> {
       _ => throw StateError('Unsupported library item'),
     };
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: widget.mobile ? 16 : 24,
+        vertical: 6,
+      ),
       leading: Container(
         width: 48,
         height: 48,
@@ -459,16 +673,21 @@ class TrackRow extends StatelessWidget {
     required this.track,
     required this.onPlay,
     required this.onMenu,
+    this.mobile = false,
   });
   final BackendController backend;
   final api.Track track;
   final VoidCallback onPlay;
   final void Function(Offset?) onMenu;
+  final bool mobile;
   @override
   Widget build(BuildContext context) => GestureDetector(
     onSecondaryTapDown: (d) => onMenu(d.globalPosition),
     child: ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: mobile ? 16 : 24,
+        vertical: mobile ? 4 : 2,
+      ),
       leading: MusicArtwork(
         sessionId: backend.sessionId,
         trackId: track.id,
@@ -483,7 +702,7 @@ class TrackRow extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (MediaQuery.sizeOf(context).width >= 900)
+          if (!mobile && MediaQuery.sizeOf(context).width >= 900)
             Text(
               musicTime(track.durationMs.toInt()),
               style: Theme.of(context).textTheme.bodySmall,
