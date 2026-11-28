@@ -125,6 +125,11 @@ void main() {
     await controller.refresh();
     expect(controller.error, isNull);
     expect(playbackTrackId(controller.playback.value), alpha);
+    // Decoder position measures frames queued to the OS, not necessarily
+    // frames already emitted by PipeWire/PulseAudio. Leave the last track
+    // playing long enough for the isolated monitor to receive real samples.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(await api.playback(sessionId: session), isA<api.Playback_Playing>());
     await controller.close();
     final players = await Process.run('playerctl', ['--list-all']);
     expect(players.stdout.toString(), isNot(contains('kiyora')));
