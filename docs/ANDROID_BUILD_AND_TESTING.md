@@ -103,9 +103,11 @@ NDK 28.2.13676358 (API 26 native target).
   visual test is skipped unless enabled. Separate visual QA rendered and
   inspected Home, Search, Library, Settings, Storage and Fullscreen Player.
 - Rust workspace tests (`--locked --offline`): 237 passed, 2 ignored, 0 failed.
-- Android `cargo check` passed for both ARM64 and x86_64. Actual ARM64 Rust
-  release linking passed; `llvm-readelf` confirmed AArch64, 16 KiB LOAD segments
-  and only Android system-library dependencies. This is not an APK check.
+- Android `cargo check` and actual Rust release linking passed for both ARM64
+  and x86_64. `llvm-readelf` confirmed the corresponding architectures, 16 KiB
+  LOAD segments and only Android system-library dependencies. ARM64 TDLib with
+  pinned OpenSSL/zlib also built and passed the ELF alignment checks. These
+  native checks are not APK checks.
 - AAPT2 successfully compiled Android resource XML.
 - Real Linux FRB lifecycle smoke: seed and restore passed. Real Linux offline
   decoder and MPRIS playback smoke: passed, 162,656 PCM samples above threshold
