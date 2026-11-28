@@ -68,6 +68,15 @@ pub struct Database {
     binding: Binding,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TrackSort {
+    #[default]
+    Existing,
+    Title,
+    Artist,
+    Album,
+}
+
 impl Database {
     pub fn has_pending_gc(&self) -> Result<bool, DbError> {
         Ok(self.connection.query_row("SELECT EXISTS(SELECT 1 FROM gc_plans WHERE vault_id=?1 AND status NOT IN ('\"complete\"','\"abandoned\"'))", [self.binding.vault_id.to_string()], |r| r.get(0))?)
@@ -122,6 +131,13 @@ impl Database {
     }
     fn initialize(mut connection: Connection, binding: Binding) -> Result<Self, DbError> {
         connection.busy_timeout(Duration::from_secs(5))?;
+        // SQLite NOCASE only folds ASCII. Fold Unicode case for the
+        // catalogue (including Cyrillic), with track ID as a stable tie-break.
+        connection.create_collation("KIYORA_TEXT", |a, b| {
+            a.chars()
+                .flat_map(char::to_lowercase)
+                .cmp(b.chars().flat_map(char::to_lowercase))
+        })?;
         // Refuse a future schema before changing journal mode or any disk data.
         migrations::version(&connection)?;
         connection.execute_batch(
@@ -397,6 +413,70 @@ impl Database {
         limit: u32,
     ) -> Result<Vec<Track>, DbError> {
         self.search("tracks", "track_fts", "track_id", query, offset, limit)
+    }
+
+    /// Filter complete cached media against the currently registered sources,
+    /// then sort the entire result before paging. None means all tracks.
+    pub fn filtered_library(
+        &self,
+        query: Option<&str>,
+        cached_keys: Option<&[String]>,
+        sort: TrackSort,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Track>, DbError> {
+        let query = query.map(str::trim).filter(|s| !s.is_empty());
+        let literal = query.map(|q| format!("\"{}\"", q.replace('"', "\"\"")));
+        let cached = cached_keys.map(serde_json::to_string).transpose()?;
+        let source = if query.is_some() {
+            "tracks t JOIN track_fts f ON f.vault_id=t.vault_id AND f.track_id=t.track_id"
+        } else {
+            "tracks t"
+        };
+        let search = if query.is_some() {
+            "AND track_fts MATCH ?4"
+        } else {
+            "AND ?4 IS NULL"
+        };
+        // The cache index can contain retired sources and non-audio entries.
+        // Match the full track:source key against live source IDs; DISTINCT
+        // prevents duplicate tracks when multiple copies are cached.
+        let filter = if cached.is_some() {
+            "AND t.track_id IN (
+                SELECT DISTINCT ctrack.track_id FROM json_each(?5) c
+                JOIN tracks ctrack ON ctrack.vault_id=?1 AND ctrack.track_id=substr(c.value,1,36)
+                JOIN json_each(ctrack.json,'$.sources') s
+                  ON c.value=ctrack.track_id || ':' || s.key
+            )"
+        } else {
+            "AND ?5 IS NULL"
+        };
+        let order = match sort {
+            TrackSort::Existing => "t.track_id",
+            TrackSort::Title => "t.title COLLATE KIYORA_TEXT,t.track_id",
+            TrackSort::Artist => {
+                "t.performer COLLATE KIYORA_TEXT,t.title COLLATE KIYORA_TEXT,t.track_id"
+            }
+            TrackSort::Album => {
+                "t.album COLLATE KIYORA_TEXT,t.title COLLATE KIYORA_TEXT,t.track_id"
+            }
+        };
+        let sql = format!(
+            "SELECT t.json FROM {source} WHERE t.vault_id=?1 {search} {filter} ORDER BY {order} LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = self.connection.prepare(&sql)?;
+        let mut rows = stmt.query(params![
+            self.binding.vault_id.to_string(),
+            limit.clamp(1, 500),
+            offset,
+            literal,
+            cached
+        ])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(serde_json::from_str(&row.get::<_, String>(0)?)?);
+        }
+        Ok(results)
     }
     pub fn playlists(
         &self,

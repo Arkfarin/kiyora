@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 vault-domain.workspace = true
 vault-protocol.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["collation"] }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

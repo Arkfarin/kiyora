@@ -376,6 +376,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TrackPage dco_decode_track_page(dynamic raw);
 
   @protected
+  TrackSort dco_decode_track_sort(dynamic raw);
+
+  @protected
   Transport dco_decode_transport(dynamic raw);
 
   @protected
@@ -753,6 +756,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TrackPage sse_decode_track_page(SseDeserializer deserializer);
+
+  @protected
+  TrackSort sse_decode_track_sort(SseDeserializer deserializer);
 
   @protected
   Transport sse_decode_transport(SseDeserializer deserializer);
@@ -1203,6 +1209,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_track_page(TrackPage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_track_sort(TrackSort self, SseSerializer serializer);
 
   @protected
   void sse_encode_transport(Transport self, SseSerializer serializer);

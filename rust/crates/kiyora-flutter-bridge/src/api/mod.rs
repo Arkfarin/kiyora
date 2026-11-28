@@ -8,7 +8,9 @@ pub mod offline;
 #[cfg(test)]
 mod tests;
 pub mod vault;
-use std::{path::PathBuf, sync::Arc};
+#[cfg(not(target_os = "android"))]
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -508,6 +510,47 @@ pub async fn library(
         .library(query, offset, limit)
         .await
         .map_err(ApiError::from)?;
+    Ok(tracks.into_iter().map(Into::into).collect())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TrackSort {
+    Existing,
+    Title,
+    Artist,
+    Album,
+}
+
+/// Filter and sort the full local track catalogue before offset/limit.
+pub async fn library_filtered(
+    session_id: String,
+    query: Option<String>,
+    downloaded_only: bool,
+    sort: TrackSort,
+    offset: u32,
+    limit: u32,
+) -> Result<Vec<Track>, BridgeError> {
+    if limit == 0 || limit > 500 || query.as_ref().is_some_and(|q| q.len() > 1024) {
+        return Err(invalid());
+    }
+    let sort = match sort {
+        TrackSort::Existing => vault_db::TrackSort::Existing,
+        TrackSort::Title => vault_db::TrackSort::Title,
+        TrackSort::Artist => vault_db::TrackSort::Artist,
+        TrackSort::Album => vault_db::TrackSort::Album,
+    };
+    let state = runtime().await?;
+    let tracks = state
+        .backend
+        .filtered_library(
+            id(&session_id)?,
+            query,
+            downloaded_only,
+            sort,
+            offset,
+            limit,
+        )
+        .await?;
     Ok(tracks.into_iter().map(Into::into).collect())
 }
 

@@ -48,6 +48,50 @@ fn usage(path: &Path, depth: usize) -> Result<u64, ApiError> {
 }
 
 impl Backend {
+    /// Query the local projection and complete cache index under one profile
+    /// lease. Partial transfers never enter the complete cache index.
+    pub async fn filtered_library(
+        &self,
+        session_id: Uuid,
+        query: Option<String>,
+        downloaded_only: bool,
+        sort: vault_db::TrackSort,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<vault_domain::Track>, ApiError> {
+        let guard = self.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+        check_session(session, session_id)?;
+        let reader = session
+            .service
+            .as_ref()
+            .map(VaultService::reader)
+            .or_else(|| session.reader.clone())
+            .ok_or_else(|| {
+                ApiError::new(if session.repair_required {
+                    ErrorCode::DatabaseCorrupt
+                } else {
+                    ErrorCode::NoVault
+                })
+            })?;
+        let keys = if downloaded_only {
+            let cache = session.cache.clone();
+            Some(
+                tokio::task::spawn_blocking(move || cache.complete_keys())
+                    .await
+                    .map_err(|_| ApiError::new(ErrorCode::Internal))??,
+            )
+        } else {
+            None
+        };
+        let tracks = reader
+            .filtered_library(query, keys, sort, offset, limit)
+            .await?;
+        drop(guard);
+        Ok(tracks)
+    }
     /// Rehydrate transfers after a WebView reload without starting any downloads.
     pub async fn downloads(&self, session_id: Uuid) -> Result<Vec<DownloadInfo>, ApiError> {
         let guard = self.session.lock().await;

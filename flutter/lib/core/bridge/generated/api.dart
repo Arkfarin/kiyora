@@ -14,7 +14,7 @@ part 'api.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `invalid`, `restore_session`, `runtime`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Runtime`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
 
 /// Desktop initialization uses the shared ProfileStore and OS keyring.
 /// Android must install its native storage/media adapters first.
@@ -87,6 +87,23 @@ Future<List<Track>> library_({
 }) => RustLib.instance.api.crateApiLibrary(
   sessionId: sessionId,
   query: query,
+  offset: offset,
+  limit: limit,
+);
+
+/// Filter and sort the full local track catalogue before offset/limit.
+Future<List<Track>> libraryFiltered({
+  required String sessionId,
+  String? query,
+  required bool downloadedOnly,
+  required TrackSort sort,
+  required int offset,
+  required int limit,
+}) => RustLib.instance.api.crateApiLibraryFiltered(
+  sessionId: sessionId,
+  query: query,
+  downloadedOnly: downloadedOnly,
+  sort: sort,
   offset: offset,
   limit: limit,
 );
@@ -415,6 +432,8 @@ class Track {
           durationMs == other.durationMs &&
           artworkDigest == other.artworkDigest;
 }
+
+enum TrackSort { existing, title, artist, album }
 
 @freezed
 sealed class Transport with _$Transport {

@@ -1,8 +1,114 @@
 #![allow(clippy::unwrap_used)]
 use uuid::Uuid;
-use vault_db::{Binding, Database};
+use vault_db::{Binding, Database, TrackSort};
 use vault_domain::*;
 use vault_protocol::Record;
+
+#[test]
+fn downloaded_filter_and_sort_apply_before_pagination() {
+    let binding = Binding {
+        vault_id: Uuid::new_v4(),
+        owner_id: UserId::new(42).unwrap(),
+        chat_id: ChatId::new(-100).unwrap(),
+    };
+    let mut db = Database::memory(binding).unwrap();
+    let ids = (1..=5).map(Uuid::from_u128).collect::<Vec<_>>();
+    let sources = (11..=16).map(Uuid::from_u128).collect::<Vec<_>>();
+    let mut order = 100;
+    for (i, (title, performer, album)) in [
+        ("Zulu", "Beta", "First"),
+        ("alpha", "Zulu", "Second"),
+        ("Alpha", "Alpha", "Third"),
+        ("Middle", "Alpha", "First"),
+        ("Uncached", "A", "First"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut register = |source_id, alternate| {
+            order += 1;
+            let source = Source {
+                source_id,
+                chat_id: binding.chat_id,
+                message_id: MessageId::new(order).unwrap(),
+                sha256: None,
+                size_bytes: None,
+            };
+            let event = Event {
+                vault_id: binding.vault_id,
+                op_id: Uuid::new_v4(),
+                device_id: "device".into(),
+                base_generation: 0,
+                entity_id: ids[i],
+                action: if alternate {
+                    Action::SourceRelink { source }
+                } else {
+                    Action::TrackRegister {
+                        metadata: Metadata {
+                            title: title.into(),
+                            performer: performer.into(),
+                            album: album.into(),
+                            ..Default::default()
+                        },
+                        source,
+                    }
+                },
+            };
+            assert_eq!(
+                db.apply_record(
+                    MessageId::new(order).unwrap(),
+                    &Record::Event(Box::new(event))
+                )
+                .unwrap(),
+                Some(Outcome::Applied)
+            );
+        };
+        register(sources[i], false);
+        if i == 2 {
+            register(sources[5], true);
+        }
+    }
+    let keys = vec![
+        format!("{}:{}", ids[1], sources[1]),
+        format!("{}:{}", ids[2], sources[2]),
+        format!("{}:{}", ids[2], sources[5]), // alternate source, no duplicate
+        format!("{}:{}", ids[3], sources[3]),
+        format!("{}:{}", ids[0], Uuid::new_v4()), // retired/nonregistered source
+        format!("{}:{}", Uuid::new_v4(), sources[0]), // deleted track
+        "artwork:other".into(),
+    ];
+    let list = |query, keys, sort, offset, limit| {
+        db.filtered_library(query, keys, sort, offset, limit)
+            .unwrap()
+            .into_iter()
+            .map(|track| track.track_id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(list(None, None, TrackSort::Existing, 0, 5), ids);
+    assert_eq!(list(None, Some(&keys), TrackSort::Existing, 0, 1), [ids[1]]);
+    assert_eq!(list(None, Some(&keys), TrackSort::Existing, 1, 1), [ids[2]]);
+    assert_eq!(list(None, Some(&keys), TrackSort::Existing, 2, 1), [ids[3]]);
+    assert!(list(None, Some(&keys), TrackSort::Existing, 3, 1).is_empty());
+    assert!(list(None, Some(&[]), TrackSort::Existing, 0, 5).is_empty());
+    assert_eq!(
+        list(Some("Alpha"), Some(&keys), TrackSort::Title, 0, 5),
+        [ids[1], ids[2], ids[3]]
+    );
+    assert_eq!(
+        list(Some("Alpha"), Some(&keys), TrackSort::Artist, 1, 1),
+        [ids[3]]
+    );
+    assert_eq!(list(None, None, TrackSort::Title, 0, 2), [ids[1], ids[2]]);
+    assert_eq!(
+        list(None, None, TrackSort::Title, 2, 3),
+        [ids[3], ids[4], ids[0]]
+    );
+    assert_eq!(
+        list(None, Some(&keys), TrackSort::Album, 0, 3),
+        [ids[3], ids[1], ids[2]]
+    );
+    assert!(list(Some("\" OR *"), Some(&keys), TrackSort::Album, 0, 5).is_empty());
+}
 
 #[test]
 fn local_queries_preserve_forest_order_and_page_catalogues() {

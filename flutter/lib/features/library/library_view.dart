@@ -12,13 +12,21 @@ import '../../core/widgets/artwork.dart';
 import '../player/player.dart';
 import 'track_actions.dart';
 
-enum LibraryFilter { tracks, playlists, albums, artists }
+enum LibraryFilter { tracks, playlists, albums, artists, downloaded }
 
 String filterLabel(LibraryFilter filter) => switch (filter) {
   LibraryFilter.tracks => 'Композиции',
   LibraryFilter.playlists => 'Плейлисты',
   LibraryFilter.albums => 'Альбомы',
   LibraryFilter.artists => 'Исполнители',
+  LibraryFilter.downloaded => 'Скачанные',
+};
+
+String _sortLabel(api.TrackSort sort) => switch (sort) {
+  api.TrackSort.existing => 'По умолчанию',
+  api.TrackSort.title => 'По названию',
+  api.TrackSort.artist => 'По исполнителю',
+  api.TrackSort.album => 'По альбому',
 };
 
 class LibraryView extends StatefulWidget {
@@ -48,11 +56,13 @@ class LibraryView extends StatefulWidget {
 
 class _LibraryViewState extends State<LibraryView> {
   late LibraryFilter _filter;
+  api.TrackSort _sort = api.TrackSort.existing;
   late final PagedQuery<Object> _page;
   late final TextEditingController _search;
   final _mobileScroll = ScrollController(keepScrollOffset: false);
   PageStorageBucket? _storage;
   bool _restoreScroll = true;
+  bool _restoredSort = false;
   int _requestVersion = 0;
   Timer? _debounce;
   String _query = '';
@@ -70,7 +80,7 @@ class _LibraryViewState extends State<LibraryView> {
     _filter = widget.initialFilter;
     _query = widget.search;
     _search = TextEditingController(text: _query);
-    _page = PagedQuery(_fetch)..reset();
+    _page = PagedQuery(_fetch);
     b.libraryRevision.addListener(_refresh);
   }
 
@@ -91,7 +101,19 @@ class _LibraryViewState extends State<LibraryView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _storage = PageStorage.maybeOf(context);
+    if (!_restoredSort) {
+      _restoredSort = true;
+      final sort = _storage?.readState(context, identifier: _sortId);
+      if (sort is api.TrackSort) _sort = sort;
+      _refresh();
+    }
   }
+
+  Object get _sortId =>
+      (b.sessionId, widget.location.destination, 'track-sort');
+
+  bool get _trackFilter =>
+      _filter == LibraryFilter.tracks || _filter == LibraryFilter.downloaded;
 
   Object get _scrollId => (
     widget.location.destination,
@@ -99,6 +121,7 @@ class _LibraryViewState extends State<LibraryView> {
     widget.location.title,
     widget.location.artist,
     _filter,
+    _sort,
     _query,
   );
 
@@ -183,12 +206,22 @@ class _LibraryViewState extends State<LibraryView> {
         return page.tracks;
       default:
         return switch (_filter) {
-          LibraryFilter.tracks => api.library_(
-            sessionId: b.sessionId,
-            query: _query,
-            offset: offset,
-            limit: limit,
-          ),
+          LibraryFilter.tracks || LibraryFilter.downloaded =>
+            _filter == LibraryFilter.tracks && _sort == api.TrackSort.existing
+                ? api.library_(
+                    sessionId: b.sessionId,
+                    query: _query,
+                    offset: offset,
+                    limit: limit,
+                  )
+                : api.libraryFiltered(
+                    sessionId: b.sessionId,
+                    query: _query,
+                    downloadedOnly: _filter == LibraryFilter.downloaded,
+                    sort: _sort,
+                    offset: offset,
+                    limit: limit,
+                  ),
           LibraryFilter.playlists => content.playlists(
             sessionId: b.sessionId,
             query: _query,
@@ -235,6 +268,35 @@ class _LibraryViewState extends State<LibraryView> {
     },
   );
 
+  Widget _sortMenu() => PopupMenuButton<api.TrackSort>(
+    tooltip: 'Сортировка',
+    initialValue: _sort,
+    onSelected: (sort) {
+      if (sort == _sort) return;
+      setState(() => _sort = sort);
+      _storage?.writeState(context, sort, identifier: _sortId);
+      if (widget.mobile && !widget.externalSearch) {
+        _debounce?.cancel();
+        _query = _search.text;
+      }
+      _resetResults();
+    },
+    itemBuilder: (_) => [
+      for (final sort in api.TrackSort.values)
+        CheckedPopupMenuItem(
+          value: sort,
+          checked: sort == _sort,
+          child: Text(_sortLabel(sort)),
+        ),
+    ],
+    icon: Icon(
+      Icons.sort,
+      color: _sort == api.TrackSort.existing
+          ? null
+          : Theme.of(context).colorScheme.primary,
+    ),
+  );
+
   Widget _emptyState(BuildContext context) {
     final nav = widget.navigation;
     final destination = widget.location.destination;
@@ -247,6 +309,15 @@ class _LibraryViewState extends State<LibraryView> {
       title = 'Ничего не найдено';
       description = 'Попробуйте другое название или исполнителя.';
       action = null;
+    } else if (!_detail && _filter == LibraryFilter.downloaded) {
+      title = 'Нет скачанных композиций';
+      description = 'Скачайте музыку через меню композиции. Здесь появятся файлы, доступные офлайн.';
+      actionLabel = 'Все композиции';
+      action = () {
+        setState(() => _filter = LibraryFilter.tracks);
+        widget.onFilterChanged?.call(_filter);
+        _resetResults();
+      };
     } else if (widget.mobile) {
       if (destination == Destination.search) {
         title = 'Найдите свою музыку';
@@ -441,8 +512,12 @@ class _LibraryViewState extends State<LibraryView> {
                         spacing: 8,
                         runSpacing: 4,
                         children: [
-                          for (final filter in LibraryFilter.values)
-                            _filterChip(filter),
+                          _filterChip(LibraryFilter.tracks),
+                          _filterChip(LibraryFilter.playlists),
+                          if (_trackFilter) _sortMenu(),
+                          _filterChip(LibraryFilter.albums),
+                          _filterChip(LibraryFilter.artists),
+                          _filterChip(LibraryFilter.downloaded),
                         ],
                       )
                     else
@@ -455,6 +530,7 @@ class _LibraryViewState extends State<LibraryView> {
                                 padding: const EdgeInsets.only(right: 8),
                                 child: _filterChip(filter),
                               ),
+                            if (_trackFilter) _sortMenu(),
                           ],
                         ),
                       ),

@@ -254,6 +254,45 @@ fn cache_lease_prevents_clear_until_decoder_releases_file() {
 }
 
 #[test]
+fn complete_keys_exclude_partial_missing_and_truncated_files_without_touching_lru() {
+    let dir = tempdir().unwrap();
+    let cache = CacheManager::open(dir.path().join("cache"), 2_000_000).unwrap();
+    let path = dir.path().join("audio");
+    std::fs::write(&path, b"audio bytes").unwrap();
+    let hash = hex::encode(Sha256::digest(b"audio bytes"));
+    let a = cache.insert("pinned".into(), &path, &hash, true).unwrap();
+    let b = cache
+        .insert("unpinned".into(), &path, &hash, false)
+        .unwrap();
+    let c = cache.insert("missing".into(), &path, &hash, false).unwrap();
+    let partial = cache
+        .prepare_partial_download("partial", 1, 100, None)
+        .unwrap();
+    drop(partial);
+    let before = cache.entries().unwrap();
+    assert_eq!(
+        cache.complete_keys().unwrap(),
+        ["missing", "pinned", "unpinned"]
+    );
+    assert_eq!(
+        cache
+            .entries()
+            .unwrap()
+            .iter()
+            .map(|e| e.last_access_unix)
+            .collect::<Vec<_>>(),
+        before
+            .iter()
+            .map(|e| e.last_access_unix)
+            .collect::<Vec<_>>()
+    );
+    std::fs::remove_file(&c.path).unwrap();
+    std::fs::write(&b.path, b"x").unwrap();
+    assert_eq!(cache.complete_keys().unwrap(), ["pinned"]);
+    drop((a, b, c));
+}
+
+#[test]
 fn download_reservations_cannot_exceed_cache_quota() {
     let dir = tempdir().unwrap();
     let cache = CacheManager::open(dir.path().join("cache"), 100).unwrap();

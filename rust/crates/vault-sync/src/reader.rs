@@ -147,7 +147,8 @@ impl ProjectionReader {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Track>, SyncError> {
-        self.read(move |db| db.catalog_tracks(album.as_deref(), &artist, offset, limit)).await
+        self.read(move |db| db.catalog_tracks(album.as_deref(), &artist, offset, limit))
+            .await
     }
     pub async fn artists(
         &self,
@@ -165,6 +166,25 @@ impl ProjectionReader {
     ) -> Result<Vec<Track>, SyncError> {
         self.read(move |db| db.library(query.as_deref(), offset, limit))
             .await
+    }
+    pub async fn filtered_library(
+        &self,
+        query: Option<String>,
+        cached_keys: Option<Vec<String>>,
+        sort: vault_db::TrackSort,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Track>, SyncError> {
+        self.read(move |db| {
+            db.filtered_library(
+                query.as_deref(),
+                cached_keys.as_deref(),
+                sort,
+                offset,
+                limit,
+            )
+        })
+        .await
     }
     pub async fn playlists(
         &self,

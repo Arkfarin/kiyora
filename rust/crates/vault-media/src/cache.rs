@@ -164,6 +164,22 @@ impl CacheManager {
         let state = self.0.lock().map_err(|_| MediaError::CacheIndex)?;
         Ok(state.index.entries.values().cloned().collect())
     }
+    /// Snapshot complete published files without acquiring playback leases or
+    /// modifying LRU access timestamps. Integrity is checked on publication,
+    /// reconciliation and playback; reject missing/truncated files here too.
+    pub fn complete_keys(&self) -> Result<Vec<String>, MediaError> {
+        let state = self.0.lock().map_err(|_| MediaError::CacheIndex)?;
+        Ok(state
+            .index
+            .entries
+            .values()
+            .filter_map(|entry| {
+                let metadata = fs::symlink_metadata(cache_path(&state.root, entry.file_id)).ok()?;
+                (metadata.is_file() && metadata.len() == entry.size_bytes)
+                    .then(|| entry.key.clone())
+            })
+            .collect())
+    }
     pub fn used_bytes(&self) -> Result<u64, MediaError> {
         Ok(self.stats()?.used_bytes)
     }
