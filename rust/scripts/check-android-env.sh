@@ -13,6 +13,7 @@ done
 for file in "$ANDROID_HOME/platforms/android-36/android.jar" \
   "$ANDROID_HOME/build-tools/36.0.0/aapt2" \
   "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+  "$ANDROID_HOME/build-tools/36.0.0/zipalign" \
   "$NDK_HOME/build/cmake/android.toolchain.cmake"; do
   if [[ ! -f "$file" ]]; then
     echo "Missing Android SDK/NDK file: $file" >&2
