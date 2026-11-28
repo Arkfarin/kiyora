@@ -6,6 +6,7 @@ import '../../core/bridge/generated/api.dart' as api;
 import '../../core/routing/navigation.dart';
 import '../../core/state/backend_controller.dart';
 import '../../core/state/paged_query.dart';
+import 'track_offline.dart';
 
 Future<String?> askName(
   BuildContext context,
@@ -76,9 +77,11 @@ Future<void> showTrackActions(
   String? playlistId,
   String? entryId,
 }) async {
+  final sessionId = b.session?.sessionId;
   final actions = <(String, IconData, String)>[
     ('next', Icons.playlist_play, 'Воспроизвести следующим'),
     ('queue', Icons.queue_music, 'Добавить в очередь'),
+    ('offline', Icons.download_outlined, 'Офлайн-доступ'),
     ('like', Icons.favorite_border, 'Добавить в любимые'),
     ('unlike', Icons.heart_broken_outlined, 'Убрать из любимых'),
     ('playlist', Icons.playlist_add, 'Добавить в плейлист'),
@@ -140,8 +143,15 @@ Future<void> showTrackActions(
       ],
     );
   }
-  if (action == null || !context.mounted) return;
+  if (action == null ||
+      !context.mounted ||
+      sessionId == null ||
+      b.session?.sessionId != sessionId) {
+    return;
+  }
   switch (action) {
+    case 'offline':
+      await showTrackOffline(context, b, track);
     case 'next':
     case 'queue':
       await b.editQueue(
