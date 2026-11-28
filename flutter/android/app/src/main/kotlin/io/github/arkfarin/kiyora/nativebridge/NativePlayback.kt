@@ -79,7 +79,13 @@ internal object NativePlayback {
         check(active.ready == null)
         active.ready = ready
         active.lastUpdateMs = SystemClock.elapsedRealtime()
-        if (retiringService == null) startService(active)
+        val service = active.service
+        if (service != null && owns(active, service) && service.isForeground) {
+            // Already foreground: no new FGS launch is necessary, including
+            // during automatic queue advancement with the screen locked.
+            service.attach(active)
+            completeBegin(active, service)
+        } else if (retiringService == null) startService(active)
         main.postDelayed({
             if (registration === active && active.ready === ready) {
                 active.ready = null
@@ -125,14 +131,19 @@ internal object NativePlayback {
                 control(active, "resume")
             }
             else -> {
-                val ready = active.ready ?: return false
-                active.ready = null
-                val success = try { service.acquirePlaybackFocus() } catch (_: Exception) { false }
-                if (!success) service.pausePlayback()
-                ready(success)
+                if (active.ready == null) return service.isForeground
+                completeBegin(active, service)
             }
         }
         return true
+    }
+
+    private fun completeBegin(active: Registration, service: PlaybackService) {
+        val ready = active.ready ?: return
+        active.ready = null
+        val success = try { service.acquirePlaybackFocus() } catch (_: Exception) { false }
+        if (!success) service.pausePlayback()
+        ready(success)
     }
 
     fun update(owner: String, state: JSONObject) {
@@ -151,6 +162,16 @@ internal object NativePlayback {
         val active = requireOwner(owner)
         active.state.put("state", "paused")
         active.service?.pausePlayback()
+    }
+
+    fun ended(owner: String) {
+        val active = requireOwner(owner)
+        // The backend may be resolving/downloading the next queue item. Keep
+        // the existing foreground notification and let the watchdog bound it.
+        active.state = JSONObject().put("state", "buffering")
+            .put("position_ms", active.metadata.optLong("duration_ms", 0))
+        active.lastUpdateMs = SystemClock.elapsedRealtime()
+        active.service?.updatePlayback()
     }
 
     fun stop(owner: String) {

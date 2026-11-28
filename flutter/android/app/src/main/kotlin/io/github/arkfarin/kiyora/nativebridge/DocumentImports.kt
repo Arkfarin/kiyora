@@ -24,11 +24,12 @@ internal class DocumentCopy {
 
 /** Copy only explicitly granted content URIs. Names never select an output path. */
 internal class DocumentImports(private val context: Context,
-    directory: File = File(context.noBackupFilesDir, "kiyora-document-imports"),
+    directory: File = File(context.noBackupFilesDir.canonicalFile, "kiyora-document-imports"),
     private val limit: Long = 8L * 1024 * 1024 * 1024) {
     // Android may expose the same private directory through /data/data and /data/user/0.
-    private val root = directory.canonicalFile
+    private val root = directory.absoluteFile
     init {
+        check(root.canonicalFile == root.absoluteFile)
         check(root.isDirectory || root.mkdirs())
         check(root.canonicalFile == root.absoluteFile)
         root.setReadable(false, false); root.setReadable(true, true)
@@ -83,7 +84,10 @@ internal class DocumentImports(private val context: Context,
             val fd = android.system.Os.open(root.path, android.system.OsConstants.O_RDONLY, 0)
             try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
             return destination
-        } finally { control.input.getAndSet(null)?.close(); temporary.delete() }
+        } finally {
+            try { control.input.getAndSet(null)?.close() }
+            finally { temporary.delete() }
+        }
     }
     @Synchronized
     fun release(id: String) {

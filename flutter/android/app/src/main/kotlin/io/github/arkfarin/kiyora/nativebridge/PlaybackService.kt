@@ -46,6 +46,7 @@ class PlaybackService : Service() {
     private var artworkTrack: String? = null
     private val transportActions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP or PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
     private var foreground = false
+    internal val isForeground: Boolean get() = foreground
     private var receiverRegistered = false
     private var pausedAt: Long? = null
     private val pendingIntents = mutableListOf<PendingIntent>()
@@ -117,7 +118,10 @@ class PlaybackService : Service() {
                         promote()
                         NativePlayback.control(registration, "resume")
                     }
-                    override fun onPause() { cancelFocusResume(); NativePlayback.control(registration, "pause") }
+                    override fun onPause() {
+                        if (!NativePlayback.owns(registration, this@PlaybackService)) return
+                        cancelFocusResume(); NativePlayback.control(registration, "pause")
+                    }
                     override fun onSkipToNext() {
                         if (!NativePlayback.owns(registration, this@PlaybackService)) return
                         cancelFocusResume(); promote(); NativePlayback.control(registration, "next")
@@ -126,9 +130,11 @@ class PlaybackService : Service() {
                         if (!NativePlayback.owns(registration, this@PlaybackService)) return
                         cancelFocusResume(); promote(); NativePlayback.control(registration, "previous")
                     }
-                    override fun onStop() { NativePlayback.control(registration, "stop") }
+                    override fun onStop() {
+                        if (NativePlayback.owns(registration, this@PlaybackService)) NativePlayback.control(registration, "stop")
+                    }
                     override fun onSeekTo(pos: Long) {
-                        if (pos >= 0) NativePlayback.control(registration, "seek", pos)
+                        if (pos >= 0 && NativePlayback.owns(registration, this@PlaybackService)) NativePlayback.control(registration, "seek", pos)
                     }
                 }, main)
                 setPlaybackToLocal(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
@@ -188,7 +194,8 @@ class PlaybackService : Service() {
                         AudioManager.AUDIOFOCUS_GAIN -> {
                             focused = true
                             if (resumeOnFocusGain) {
-                                resumeOnFocusGain = false
+                                // The queued pause may still be reaching Rust.
+                                // Clear this flag only once resume acquires focus.
                                 promote()
                                 NativePlayback.control(registration, "resume")
                             }
@@ -212,7 +219,7 @@ class PlaybackService : Service() {
             val result = audio.requestAudioFocus(request)
             focused = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         }
-        if (focused) { pausedAt = null; renewWakeLock(); session?.isActive = true }
+        if (focused) { resumeOnFocusGain = false; pausedAt = null; renewWakeLock(); session?.isActive = true }
         return focused
     }
 
@@ -256,11 +263,15 @@ class PlaybackService : Service() {
             // detaching; a direct notify() could be overwritten by an older
             // in-flight foreground notification carrying a Pause action.
             promote()
-            stopForeground(STOP_FOREGROUND_DETACH)
+            // Retain foreground eligibility during transient focus loss. On
+            // Android 15 the focus-gain callback may arrive in the background.
+            if (!resumeOnFocusGain) {
+                stopForeground(STOP_FOREGROUND_DETACH)
+                foreground = false
+            }
         } else if (session != null) {
             notifications.notify(NOTIFICATION, notification())
         }
-        foreground = false
     }
 
     internal fun stopPlayback() {

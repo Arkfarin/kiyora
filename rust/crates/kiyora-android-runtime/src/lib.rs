@@ -169,6 +169,10 @@ struct Media;
 struct MediaSession {
     owner: Uuid,
     last_update: Option<(Instant, u8)>,
+    // The shared engine calls stop once immediately after publishing Ended.
+    // Retain Android's foreground service across this queue handoff; a later
+    // explicit stop (including an exhausted queue) still tears it down.
+    finishing_track: bool,
 }
 impl MediaSession {
     fn send(&self, action: &str, payload: String) -> Result<(), PlaybackError> {
@@ -204,6 +208,7 @@ impl PlaybackPlatform for Media {
         let session = MediaSession {
             owner: Uuid::new_v4(),
             last_update: None,
+            finishing_track: false,
         };
         {
             let mut slot = CONTROLS
@@ -220,6 +225,7 @@ impl PlaybackPlatform for Media {
 }
 impl PlatformPlaybackSession for MediaSession {
     fn prepare(&mut self, metadata: &PlaybackMetadata) -> Result<(), PlaybackError> {
+        self.finishing_track = false;
         self.last_update = None;
         self.send(
             "prepare",
@@ -236,7 +242,9 @@ impl PlatformPlaybackSession for MediaSession {
     }
     fn update(&mut self, state: &PlaybackState) -> Result<(), PlaybackError> {
         if matches!(state, PlaybackState::Ended { .. }) {
-            self.stop();
+            self.last_update = None;
+            self.send("ended", String::new())?;
+            self.finishing_track = true;
             return Ok(());
         }
         let kind = match state {
@@ -262,6 +270,9 @@ impl PlatformPlaybackSession for MediaSession {
     }
     fn stop(&mut self) {
         self.last_update = None;
+        if std::mem::take(&mut self.finishing_track) {
+            return;
+        }
         let _ = self.send("stop", String::new());
     }
     fn artwork(&mut self, track_id: Uuid, bytes: &[u8]) -> Result<(), PlaybackError> {
@@ -291,12 +302,13 @@ impl PlatformPlaybackSession for MediaSession {
 }
 impl Drop for MediaSession {
     fn drop(&mut self) {
+        // Do not let a replacement connect until Kotlin has closed this owner.
+        let _ = self.send("close", String::new());
         if let Ok(mut slot) = CONTROLS.lock() {
             if slot.as_ref().is_some_and(|(owner, _)| *owner == self.owner) {
                 *slot = None;
             }
         }
-        let _ = self.send("close", String::new());
     }
 }
 

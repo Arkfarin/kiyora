@@ -45,7 +45,7 @@ object FlutterNativeBridge {
         try { secrets.set(key, value) } finally { value.fill(0) }
     }
 
-    private fun onMain(owner: String, action: (done: (Boolean) -> Unit) -> Unit): Boolean {
+    private fun onMain(owner: String, closeOnTimeout: Boolean = false, stopOnTimeout: Boolean = true, action: (done: (Boolean) -> Unit) -> Unit): Boolean {
         check(Looper.myLooper() != Looper.getMainLooper())
         val latch = CountDownLatch(1)
         val settled = AtomicBoolean(false)
@@ -62,12 +62,16 @@ object FlutterNativeBridge {
         }
         if (!latch.await(10, TimeUnit.SECONDS)) {
             settled.set(true)
-            main.post { try { NativePlayback.stop(owner) } catch (_: Exception) {} }
+            if (stopOnTimeout) main.post {
+                try {
+                    if (closeOnTimeout) NativePlayback.close(owner) else NativePlayback.stop(owner)
+                } catch (_: Exception) {}
+            }
             return false
         }
         return result.get()
     }
-    fun mediaCall(owner: String, action: String, payload: String): Boolean = onMain(owner) { done ->
+    fun mediaCall(owner: String, action: String, payload: String): Boolean = onMain(owner, action == "open" || action == "close") { done ->
         when (action) {
             "open" -> {
                 NativePlayback.open(application, owner) { control, position ->
@@ -79,12 +83,13 @@ object FlutterNativeBridge {
             "resume" -> NativePlayback.resume(owner, done)
             "pause" -> { NativePlayback.pause(owner); done(true) }
             "update" -> { NativePlayback.update(owner, JSONObject(payload)); done(true) }
+            "ended" -> { NativePlayback.ended(owner); done(true) }
             "stop" -> { NativePlayback.stop(owner); done(true) }
             "close" -> { NativePlayback.close(owner); done(true) }
             else -> done(false)
         }
     }
-    fun artwork(owner: String, track: String, bytes: ByteArray): Boolean = onMain(owner) { done ->
+    fun artwork(owner: String, track: String, bytes: ByteArray): Boolean = onMain(owner, stopOnTimeout = false) { done ->
         require(bytes.size <= 256 * 1024)
         NativePlayback.requireOwner(owner).service?.setArtwork(track, bytes)
         done(true)
