@@ -1,7 +1,7 @@
 use crate::{CacheLease, MediaError, PlaybackInput, pcm::PcmController};
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::{fs::File, io::BufReader, path::Path};
@@ -84,20 +84,23 @@ pub trait PlatformPlaybackSession: Send {
 
 #[derive(Clone)]
 pub struct PlaybackControls {
-    navigation: tokio::sync::mpsc::Sender<bool>,
+    navigation: Arc<Mutex<tokio::sync::mpsc::Sender<PlaybackNavigation>>>,
+    managed_stop: bool,
     commands: std::sync::mpsc::SyncSender<Command>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackNavigation {
+    Next,
+    Previous,
+    Stop,
 }
 impl PlaybackControls {
     /// Queue navigation is handled by the owning backend, never by the decoder.
     pub fn next(&self) -> Result<(), PlaybackError> {
-        self.navigation
-            .try_send(true)
-            .map_err(|_| PlaybackError::Closed)
+        self.navigate(PlaybackNavigation::Next)
     }
     pub fn previous(&self) -> Result<(), PlaybackError> {
-        self.navigation
-            .try_send(false)
-            .map_err(|_| PlaybackError::Closed)
+        self.navigate(PlaybackNavigation::Previous)
     }
 
     pub fn pause(&self) -> Result<(), PlaybackError> {
@@ -107,10 +110,30 @@ impl PlaybackControls {
         self.send(Command::Resume)
     }
     pub fn stop(&self) -> Result<(), PlaybackError> {
-        self.send(Command::Stop)
+        if self.managed_stop {
+            // The backend must cancel pending source resolution as well as
+            // stop the current decoder. Keep transport commands ordered.
+            self.navigate(PlaybackNavigation::Stop)
+        } else {
+            self.send(Command::Stop)
+        }
     }
     pub fn seek(&self, position_ms: u64) -> Result<(), PlaybackError> {
         self.send(Command::Seek(position_ms))
+    }
+    fn navigate(&self, action: PlaybackNavigation) -> Result<(), PlaybackError> {
+        use tokio::sync::mpsc::error::TrySendError;
+        let sender = self.navigation.lock().map_err(|_| PlaybackError::Closed)?;
+        // Serialize sends so fast Next/Previous clicks cannot fill the final
+        // slot reserved for Stop. A full queue already ends in Stop; another
+        // Stop is redundant until the receiver consumes it.
+        if self.managed_stop && action != PlaybackNavigation::Stop && sender.capacity() <= 1 {
+            return Err(PlaybackError::Closed);
+        }
+        match sender.try_send(action) {
+            Ok(()) | Err(TrySendError::Full(PlaybackNavigation::Stop)) => Ok(()),
+            Err(_) => Err(PlaybackError::Closed),
+        }
     }
     fn send(&self, command: Command) -> Result<(), PlaybackError> {
         self.commands
@@ -121,7 +144,7 @@ impl PlaybackControls {
 
 /// Opens a real OS output device and keeps the cache lease while its decoder reads.
 pub struct PlaybackEngine {
-    navigation: Option<tokio::sync::mpsc::Receiver<bool>>,
+    navigation: Option<tokio::sync::mpsc::Receiver<PlaybackNavigation>>,
     commands: std::sync::mpsc::SyncSender<Command>,
     state: watch::Receiver<PlaybackState>,
     closing: Arc<AtomicBool>,
@@ -174,18 +197,30 @@ fn open_output(failed: Arc<AtomicBool>) -> Result<rodio::OutputStream, rodio::St
 impl PlaybackEngine {
     #[cfg(not(target_os = "android"))]
     pub fn open() -> Result<Self, PlaybackError> {
-        Self::open_inner(None)
+        Self::open_inner(None, false)
     }
     /// Android callers must supply the native platform bridge, which establishes
     /// its native service registration before AAudio touches the JNI context.
     pub fn open_with_platform(platform: Arc<dyn PlaybackPlatform>) -> Result<Self, PlaybackError> {
-        Self::open_inner(Some(platform))
+        Self::open_inner(Some(platform), false)
     }
-    fn open_inner(platform: Option<Arc<dyn PlaybackPlatform>>) -> Result<Self, PlaybackError> {
+    /// The backend owns queue resolution and must consume Stop from the same
+    /// navigation receiver as Next/Previous even while resolution is pending.
+    pub fn open_with_managed_platform(
+        platform: Arc<dyn PlaybackPlatform>,
+    ) -> Result<Self, PlaybackError> {
+        Self::open_inner(Some(platform), true)
+    }
+    fn open_inner(
+        platform: Option<Arc<dyn PlaybackPlatform>>,
+        managed_stop: bool,
+    ) -> Result<Self, PlaybackError> {
         let (tx, rx) = std::sync::mpsc::sync_channel(32);
-        let (navigation_tx, navigation_rx) = tokio::sync::mpsc::channel(16);
+        let (navigation_tx, navigation_rx) =
+            tokio::sync::mpsc::channel(if managed_stop { 17 } else { 16 });
         let controls = PlaybackControls {
-            navigation: navigation_tx,
+            navigation: Arc::new(Mutex::new(navigation_tx)),
+            managed_stop,
             commands: tx.clone(),
         };
         let (state_tx, state) = watch::channel(PlaybackState::Idle);
@@ -474,7 +509,7 @@ impl PlaybackEngine {
     pub fn state(&self) -> PlaybackState {
         self.state.borrow().clone()
     }
-    pub fn take_navigation(&mut self) -> Option<tokio::sync::mpsc::Receiver<bool>> {
+    pub fn take_navigation(&mut self) -> Option<tokio::sync::mpsc::Receiver<PlaybackNavigation>> {
         self.navigation.take()
     }
     pub fn set_artwork(&self, track_id: Uuid, bytes: Vec<u8>) -> Result<(), PlaybackError> {
@@ -630,6 +665,34 @@ pub fn decode_all(path: &Path) -> Result<(u64, u64), PlaybackError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn managed_stop_keeps_order_and_has_capacity_when_navigation_is_full() {
+        let (commands, decoder) = std::sync::mpsc::sync_channel(1);
+        let (navigation, mut receiver) = tokio::sync::mpsc::channel(3);
+        let controls = PlaybackControls {
+            navigation: Arc::new(Mutex::new(navigation)),
+            commands,
+            managed_stop: true,
+        };
+        controls.next().unwrap();
+        controls.previous().unwrap();
+        assert!(controls.next().is_err());
+        controls.stop().unwrap();
+        controls.stop().unwrap(); // Full mailbox already ends in Stop.
+        assert_eq!(receiver.try_recv().unwrap(), PlaybackNavigation::Next);
+        assert_eq!(receiver.try_recv().unwrap(), PlaybackNavigation::Previous);
+        assert_eq!(receiver.try_recv().unwrap(), PlaybackNavigation::Stop);
+        assert!(receiver.try_recv().is_err());
+        assert!(decoder.try_recv().is_err()); // The backend owns the stop.
+        let standalone = PlaybackControls {
+            managed_stop: false,
+            ..controls
+        };
+        standalone.stop().unwrap();
+        assert!(matches!(decoder.try_recv().unwrap(), Command::Stop));
+    }
 
     #[test]
     #[allow(clippy::expect_used)]

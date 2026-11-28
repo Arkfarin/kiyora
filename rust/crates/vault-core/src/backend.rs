@@ -142,6 +142,34 @@ struct Session {
     playback_volume: f32,
     context: Context,
 }
+struct PendingPlayback {
+    track_id: Uuid,
+    ticket: Uuid,
+    cancel: CancellationToken,
+}
+impl Session {
+    fn invalidate_playback(&mut self) {
+        self.playback_cancel.cancel();
+        self.playback_ticket = Uuid::new_v4();
+        self.playback_id = None;
+    }
+    fn check_playback_generation(&self, expected: Uuid) -> Result<(), ApiError> {
+        if self.playback_ticket != expected {
+            return Err(ApiError::new(ErrorCode::Cancelled));
+        }
+        Ok(())
+    }
+    fn reserve_queue_item(&mut self) -> Option<PendingPlayback> {
+        let track_id = self.queue.info().current_track_id?;
+        self.invalidate_playback();
+        self.playback_cancel = CancellationToken::new();
+        Some(PendingPlayback {
+            track_id,
+            ticket: self.playback_ticket,
+            cancel: self.playback_cancel.clone(),
+        })
+    }
+}
 #[derive(Clone)]
 pub struct Backend {
     job_access: Arc<std::sync::Mutex<Option<(Context, crate::jobs::JobRegistry)>>>,
@@ -502,6 +530,7 @@ impl Backend {
                 .ok_or_else(|| ApiError::new(ErrorCode::AuthRequired))?;
             let transport = native.transport.clone();
             s.repair_required = true;
+            s.invalidate_playback();
             close_playback(s.playback.take()).await?;
             if let Some(service) = s.service.take() {
                 service.shutdown().await?;
@@ -642,10 +671,22 @@ impl Backend {
         track_id: Uuid,
         source_id: Uuid,
     ) -> Result<(), ApiError> {
-        let queue = self.set_queue(session_id, vec![track_id], 0, false).await?;
-        let (ticket, cancel) = self.begin_playback(session_id, queue.queue_id).await?;
+        let expected = self.playback_generation(session_id).await?;
+        let (_, pending) = self
+            .replace_queue(session_id, vec![track_id], 0, true, expected)
+            .await?;
+        let PendingPlayback { ticket, cancel, .. } =
+            pending.ok_or_else(|| ApiError::new(ErrorCode::Internal))?;
         self.play_track_inner(session_id, track_id, source_id, ticket, &cancel)
             .await
+    }
+    async fn playback_generation(&self, session_id: Uuid) -> Result<Uuid, ApiError> {
+        let guard = self.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+        check_session(session, session_id)?;
+        Ok(session.playback_ticket)
     }
     async fn play_track_inner(
         &self,
@@ -661,6 +702,10 @@ impl Backend {
                 .as_ref()
                 .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
             check_session(session, session_id)?;
+            session.check_playback_generation(ticket)?;
+            if cancel.is_cancelled() {
+                return Err(ApiError::new(ErrorCode::Cancelled));
+            }
             (
                 session
                     .reader
@@ -706,7 +751,7 @@ impl Backend {
         if session.playback.is_none() {
             let platform = self.playback_platform.clone();
             let mut engine = tokio::task::spawn_blocking(move || match platform {
-                Some(platform) => vault_media::PlaybackEngine::open_with_platform(platform),
+                Some(platform) => vault_media::PlaybackEngine::open_with_managed_platform(platform),
                 None => vault_media::PlaybackEngine::open(),
             })
             .await
@@ -726,13 +771,28 @@ impl Backend {
             let playback_platform = self.playback_platform.clone();
             let native_path = self.native_path.clone();
             tokio::spawn(async move {
+                // A network source can take a long time to resolve. Keep
+                // consuming media-session controls while that future is pending.
+                type NavigationJob =
+                    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+                let mut pending: Option<NavigationJob> = None;
+                let mut deferred_end: Option<NavigationJob> = None;
+                let mut navigation_open = true;
                 loop {
                     let action = tokio::select! {
+                        biased;
+                        direction = navigation.recv(), if navigation_open => {
+                            if direction.is_none() { navigation_open = false; continue; }
+                            direction
+                        },
                         changed = changes.changed() => {
                             if changed.is_err() { break; }
                             None
                         },
-                        direction = navigation.recv(), if !navigation.is_closed() => direction,
+                        _ = async { if let Some(job) = &mut pending { job.await } }, if pending.is_some() => {
+                            pending = deferred_end.take();
+                            continue;
+                        },
                     };
                     let Some(session) = weak_session.upgrade() else {
                         break;
@@ -748,19 +808,72 @@ impl Backend {
                         job_access: job_access.clone(),
                         import_resolver: import_resolver.clone(),
                     };
-                    if let Some(forward) = action {
-                        if let Err(error) = backend
-                            .control_playback(
-                                context.session_id,
-                                if forward {
-                                    PlaybackAction::Next
-                                } else {
-                                    PlaybackAction::Previous
-                                },
-                            )
-                            .await
-                        {
-                            events.emit(&context, EventData::Warning(error));
+                    if let Some(action) = action {
+                        use vault_media::PlaybackNavigation;
+                        let action = match action {
+                            PlaybackNavigation::Next => PlaybackAction::Next,
+                            PlaybackNavigation::Previous => PlaybackAction::Previous,
+                            PlaybackNavigation::Stop => PlaybackAction::Stop,
+                        };
+                        let context = context.clone();
+                        let events = events.clone();
+                        let engine = changes.clone();
+                        // Stop invalidates the outstanding ticket under the
+                        // session lock before any later navigation is received.
+                        if action == PlaybackAction::Stop {
+                            pending = None;
+                            deferred_end = None;
+                            if let Err(error) = backend
+                                .control_playback_inner(context.session_id, action, Some(&engine))
+                                .await
+                                && !matches!(
+                                    error.code,
+                                    ErrorCode::Cancelled
+                                        | ErrorCode::Conflict
+                                        | ErrorCode::NoProfile
+                                )
+                            {
+                                events.emit(&context, EventData::Warning(error));
+                            }
+                        } else {
+                            // Reserve each skip in order, but leave potentially
+                            // slow media resolution interruptible by Stop.
+                            match backend
+                                .reserve_navigation(context.session_id, action, Some(&engine))
+                                .await
+                            {
+                                Ok(reserved) => {
+                                    deferred_end = None;
+                                    pending = reserved.map(|reserved| {
+                                        let job: NavigationJob = Box::pin(async move {
+                                            if let Err(error) = backend
+                                                .play_queue_item(context.session_id, reserved)
+                                                .await
+                                                && !matches!(
+                                                    error.code,
+                                                    ErrorCode::Cancelled
+                                                        | ErrorCode::Conflict
+                                                        | ErrorCode::NoProfile
+                                                )
+                                            {
+                                                events.emit(&context, EventData::Warning(error));
+                                            }
+                                        });
+                                        job
+                                    });
+                                }
+                                Err(error)
+                                    if !matches!(
+                                        error.code,
+                                        ErrorCode::Cancelled
+                                            | ErrorCode::Conflict
+                                            | ErrorCode::NoProfile
+                                    ) =>
+                                {
+                                    events.emit(&context, EventData::Warning(error));
+                                }
+                                Err(_) => {}
+                            }
                         }
                         continue;
                     }
@@ -787,22 +900,40 @@ impl Backend {
                                 .as_millis()
                                 .min(u64::MAX as u128)
                                 as u64;
-                            if let Err(error) = reader
-                                .record_completed_play(track_id, playback_id, at_ms)
-                                .await
-                            {
-                                events.emit(&context, EventData::Warning(error.into()));
-                            }
+                            let context = context.clone();
+                            let events = events.clone();
+                            tokio::spawn(async move {
+                                if let Err(error) = reader
+                                    .record_completed_play(track_id, playback_id, at_ms)
+                                    .await
+                                {
+                                    events.emit(&context, EventData::Warning(error.into()));
+                                }
+                            });
                         }
-                        if let Err(error) = backend
-                            .advance_queue(context.session_id, true, Some(playback_id))
-                            .await
-                            && !matches!(
-                                error.code,
-                                ErrorCode::Conflict | ErrorCode::Cancelled | ErrorCode::NoProfile
-                            )
-                        {
-                            events.emit(&context, EventData::Warning(error));
+                        let context = context.clone();
+                        let events = events.clone();
+                        let job: NavigationJob = Box::pin(async move {
+                            if let Err(error) = backend
+                                .advance_queue(context.session_id, true, Some(playback_id), None)
+                                .await
+                                && !matches!(
+                                    error.code,
+                                    ErrorCode::Conflict
+                                        | ErrorCode::Cancelled
+                                        | ErrorCode::NoProfile
+                                )
+                            {
+                                events.emit(&context, EventData::Warning(error));
+                            }
+                        });
+                        if pending.is_none() {
+                            pending = Some(job);
+                        } else {
+                            // If a very short track ends before a navigation
+                            // future returns, process it after that future. The
+                            // playback ID fence rejects ends from old tracks.
+                            deferred_end = Some(job);
                         }
                     }
                 }
@@ -870,29 +1001,67 @@ impl Backend {
         session_id: Uuid,
         action: PlaybackAction,
     ) -> Result<vault_media::PlaybackState, ApiError> {
-        if action == PlaybackAction::Previous {
-            let guard = self.session.lock().await;
-            let s = guard
+        self.control_playback_inner(session_id, action, None).await
+    }
+    async fn reserve_navigation(
+        &self,
+        session_id: Uuid,
+        action: PlaybackAction,
+        expected_engine: Option<&tokio::sync::watch::Receiver<vault_media::PlaybackState>>,
+    ) -> Result<Option<PendingPlayback>, ApiError> {
+        let guard = self.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+        check_session(session, session_id)?;
+        if let Some(expected) = expected_engine
+            && !session
+                .playback
                 .as_ref()
-                .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
-            check_session(s, session_id)?;
-            if let Some(engine) = &s.playback {
+                .is_some_and(|engine| engine.state_changes().same_channel(expected))
+        {
+            return Err(ApiError::new(ErrorCode::Conflict));
+        }
+        if action == PlaybackAction::Previous && session.playback_id.is_some() {
+            if let Some(engine) = &session.playback {
                 let state = engine.state();
                 if let vault_media::PlaybackState::Playing { position_ms, .. }
                 | vault_media::PlaybackState::Paused { position_ms, .. }
                 | vault_media::PlaybackState::Buffering { position_ms, .. } = state
                     && (position_ms > 3000
-                        || (s.queue.info().position == Some(0)
-                            && s.queue.info().repeat != RepeatMode::Queue))
+                        || (session.queue.info().position == Some(0)
+                            && session.queue.info().repeat != RepeatMode::Queue))
                 {
                     engine.seek(0)?;
-                    return Ok(state);
+                    return Ok(None);
                 }
             }
         }
+        let expected = session.playback_ticket;
+        drop(guard);
+        let (_, reserved) = self
+            .reserve_advance_queue(
+                session_id,
+                action == PlaybackAction::Next,
+                None,
+                Some(expected),
+            )
+            .await?;
+        Ok(reserved)
+    }
+    async fn control_playback_inner(
+        &self,
+        session_id: Uuid,
+        action: PlaybackAction,
+        expected_engine: Option<&tokio::sync::watch::Receiver<vault_media::PlaybackState>>,
+    ) -> Result<vault_media::PlaybackState, ApiError> {
         if matches!(action, PlaybackAction::Next | PlaybackAction::Previous) {
-            self.advance_queue(session_id, action == PlaybackAction::Next, None)
-                .await?;
+            if let Some(reserved) = self
+                .reserve_navigation(session_id, action, expected_engine)
+                .await?
+            {
+                self.play_queue_item(session_id, reserved).await?;
+            }
             return self.playback_state(session_id).await;
         }
         let mut guard = self.session.lock().await;
@@ -900,9 +1069,21 @@ impl Backend {
             .as_mut()
             .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
         check_session(session, session_id)?;
+        if let Some(expected) = expected_engine
+            && !session
+                .playback
+                .as_ref()
+                .is_some_and(|engine| engine.state_changes().same_channel(expected))
+        {
+            return Err(ApiError::new(ErrorCode::Conflict));
+        }
         if action == PlaybackAction::Stop {
-            session.playback_cancel.cancel();
-            session.playback_id = None;
+            session.invalidate_playback();
+            // Stop also succeeds while the first track is still resolving and
+            // no decoder has been created yet.
+            if session.playback.is_none() {
+                return Ok(vault_media::PlaybackState::Idle);
+            }
         }
         let playback = session
             .playback
@@ -2064,6 +2245,7 @@ impl Backend {
                 .as_mut()
                 .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
             check_session(s, session_id)?;
+            s.invalidate_playback();
             close_playback(s.playback.take()).await?;
             if let Some(service) = s.service.take() {
                 service.shutdown().await?;
@@ -2082,6 +2264,7 @@ impl Backend {
                 .as_mut()
                 .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
             check_session(session, session_id)?;
+            session.invalidate_playback();
             close_playback(session.playback.take()).await?;
             if let Some(service) = session.service.take() {
                 service.shutdown().await?;

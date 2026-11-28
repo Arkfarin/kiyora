@@ -134,6 +134,36 @@ impl Backend {
         position: u32,
         autoplay: bool,
     ) -> Result<QueueInfo, ApiError> {
+        let expected = self.playback_generation(session_id).await?;
+        self.set_queue_fenced(session_id, tracks, position, autoplay, expected)
+            .await
+    }
+
+    async fn set_queue_fenced(
+        &self,
+        session_id: Uuid,
+        tracks: Vec<Uuid>,
+        position: u32,
+        autoplay: bool,
+        expected: Uuid,
+    ) -> Result<QueueInfo, ApiError> {
+        let (info, pending) = self
+            .replace_queue(session_id, tracks, position, autoplay, expected)
+            .await?;
+        if let Some(pending) = pending {
+            self.play_queue_item(session_id, pending).await?;
+        }
+        Ok(info)
+    }
+
+    pub(super) async fn replace_queue(
+        &self,
+        session_id: Uuid,
+        tracks: Vec<Uuid>,
+        position: u32,
+        autoplay: bool,
+        expected: Uuid,
+    ) -> Result<(QueueInfo, Option<PendingPlayback>), ApiError> {
         if tracks.len() > 100_000
             || (tracks.is_empty() && position != 0)
             || (!tracks.is_empty() && position as usize >= tracks.len())
@@ -144,14 +174,14 @@ impl Backend {
         if tracks.iter().any(|id| !state.tracks.contains_key(id)) {
             return Err(ApiError::new(ErrorCode::InvalidInput));
         }
-        let (info, context) = {
+        let (info, context, pending) = {
             let mut guard = self.session.lock().await;
             let s = guard
                 .as_mut()
                 .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
             check_session(s, session_id)?;
-            s.playback_cancel.cancel();
-            s.playback_id = None;
+            s.check_playback_generation(expected)?;
+            s.invalidate_playback();
             if let Some(playback) = &s.playback {
                 playback.stop()?;
             }
@@ -168,13 +198,15 @@ impl Backend {
                 s.queue.edit(QueueAction::Shuffle { enabled: true })?;
             }
             s.queue.checkpoint(&s.lease);
-            (s.queue.info(), s.context.clone())
+            let pending = if autoplay {
+                s.reserve_queue_item()
+            } else {
+                None
+            };
+            (s.queue.info(), s.context.clone(), pending)
         };
         self.events.emit(&context, EventData::Queue(info.clone()));
-        if autoplay && info.current_track_id.is_some() {
-            self.play_queue_item(session_id, info.queue_id).await?;
-        }
-        Ok(info)
+        Ok((info, pending))
     }
     pub async fn queue_playlist(
         &self,
@@ -183,6 +215,7 @@ impl Backend {
         position: u32,
         autoplay: bool,
     ) -> Result<QueueInfo, ApiError> {
+        let expected = self.playback_generation(session_id).await?;
         let state = self.local_reader(session_id).await?.state().await?;
         if !state.playlists.contains_key(&playlist_id) {
             return Err(ApiError::new(ErrorCode::InvalidInput));
@@ -199,7 +232,8 @@ impl Backend {
                     .ok_or_else(|| ApiError::new(ErrorCode::Integrity))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.set_queue(session_id, tracks, position, autoplay).await
+        self.set_queue_fenced(session_id, tracks, position, autoplay, expected)
+            .await
     }
     pub async fn playback_queue(
         &self,
@@ -225,102 +259,83 @@ impl Backend {
                 .collect(),
         })
     }
-    pub(super) async fn begin_playback(
+    pub(super) fn play_queue_item(
         &self,
         session_id: Uuid,
-        queue_id: Uuid,
-    ) -> Result<(Uuid, CancellationToken), ApiError> {
-        let mut guard = self.session.lock().await;
-        let s = guard
-            .as_mut()
-            .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
-        check_session(s, session_id)?;
-        if s.queue.id != queue_id {
-            return Err(ApiError::new(ErrorCode::Conflict));
-        }
-        s.playback_cancel.cancel();
-        s.playback_cancel = CancellationToken::new();
-        s.playback_ticket = Uuid::new_v4();
-        s.playback_id = None;
-        Ok((s.playback_ticket, s.playback_cancel.clone()))
-    }
-    async fn play_queue_item(&self, session_id: Uuid, queue_id: Uuid) -> Result<(), ApiError> {
-        let (track_id, ticket, cancel, reader, cache) = {
-            let mut guard = self.session.lock().await;
-            let s = guard
-                .as_mut()
-                .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
-            check_session(s, session_id)?;
-            if s.queue.id != queue_id {
-                return Err(ApiError::new(ErrorCode::Conflict));
-            }
-            let track = s
-                .queue
-                .info()
-                .current_track_id
-                .ok_or_else(|| ApiError::new(ErrorCode::InvalidInput))?;
-            s.playback_cancel.cancel();
-            s.playback_cancel = CancellationToken::new();
-            s.playback_ticket = Uuid::new_v4();
-            s.playback_id = None;
-            (
-                track,
-                s.playback_ticket,
-                s.playback_cancel.clone(),
-                s.reader
-                    .clone()
-                    .ok_or_else(|| ApiError::new(ErrorCode::NoVault))?,
-                s.cache.clone(),
-            )
-        };
-        let state = reader.state().await?;
-        let track = state
-            .tracks
-            .get(&track_id)
-            .ok_or_else(|| ApiError::new(ErrorCode::MediaSourceMissing))?;
-        let mut sources = track.sources.keys().copied().collect::<Vec<_>>();
-        if let Some(preferred) = track.preferred_source_id
-            && let Some(index) = sources.iter().position(|id| *id == preferred)
-        {
-            sources.remove(index);
-            sources.insert(0, preferred);
-        }
-        // Prefer any complete local copy before trying the network, then try
-        // alternate registered sources when a message is unavailable.
-        sources = tokio::task::spawn_blocking(move || -> Result<_, ApiError> {
-            let mut cached = Vec::new();
-            let mut remote = Vec::new();
-            for id in sources {
-                if cache.acquire(&media_cache_key(track_id, id))?.is_some() {
-                    cached.push(id);
-                } else {
-                    remote.push(id);
-                }
-            }
-            cached.extend(remote);
-            Ok(cached)
-        })
-        .await
-        .map_err(|_| ApiError::new(ErrorCode::Internal))??;
-        let mut last = ApiError::new(ErrorCode::MediaSourceMissing);
-        for source in sources {
-            match self
-                .play_track_inner(session_id, track_id, source, ticket, &cancel)
-                .await
+        pending: PendingPlayback,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ApiError>> + Send + '_>>
+    {
+        // The native observer can start another item without recursively
+        // embedding its own future type in the playback engine initialization.
+        Box::pin(async move {
+            let PendingPlayback {
+                track_id,
+                ticket,
+                cancel,
+            } = pending;
+            let (reader, cache) = {
+                let guard = self.session.lock().await;
+                let s = guard
+                    .as_ref()
+                    .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+                check_session(s, session_id)?;
+                s.check_playback_generation(ticket)?;
+                (
+                    s.reader
+                        .clone()
+                        .ok_or_else(|| ApiError::new(ErrorCode::NoVault))?,
+                    s.cache.clone(),
+                )
+            };
+            let state = reader.state().await?;
+            let track = state
+                .tracks
+                .get(&track_id)
+                .ok_or_else(|| ApiError::new(ErrorCode::MediaSourceMissing))?;
+            let mut sources = track.sources.keys().copied().collect::<Vec<_>>();
+            if let Some(preferred) = track.preferred_source_id
+                && let Some(index) = sources.iter().position(|id| *id == preferred)
             {
-                Ok(()) => return Ok(()),
-                Err(error)
-                    if matches!(
-                        error.code,
-                        ErrorCode::MediaSourceMissing | ErrorCode::MediaUnavailable
-                    ) =>
-                {
-                    last = error
-                }
-                Err(error) => return Err(error),
+                sources.remove(index);
+                sources.insert(0, preferred);
             }
-        }
-        Err(last)
+            // Prefer any complete local copy before trying the network, then try
+            // alternate registered sources when a message is unavailable.
+            sources = tokio::task::spawn_blocking(move || -> Result<_, ApiError> {
+                let mut cached = Vec::new();
+                let mut remote = Vec::new();
+                for id in sources {
+                    if cache.acquire(&media_cache_key(track_id, id))?.is_some() {
+                        cached.push(id);
+                    } else {
+                        remote.push(id);
+                    }
+                }
+                cached.extend(remote);
+                Ok(cached)
+            })
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::Internal))??;
+            let mut last = ApiError::new(ErrorCode::MediaSourceMissing);
+            for source in sources {
+                match self
+                    .play_track_inner(session_id, track_id, source, ticket, &cancel)
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err(error)
+                        if matches!(
+                            error.code,
+                            ErrorCode::MediaSourceMissing | ErrorCode::MediaUnavailable
+                        ) =>
+                    {
+                        last = error
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(last)
+        })
     }
     // Explicit future type breaks the watcher -> advance -> player -> watcher
     // construction cycle while preserving Send on the background observer.
@@ -329,41 +344,60 @@ impl Backend {
         session_id: Uuid,
         forward: bool,
         ended: Option<Uuid>,
+        expected_generation: Option<Uuid>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<QueueInfo, ApiError>> + Send + '_>>
     {
         Box::pin(async move {
-            let reader = self.local_reader(session_id).await?;
-            let state = reader.state().await?;
-            let (info, context) = {
-                let mut guard = self.session.lock().await;
-                let s = guard
-                    .as_mut()
-                    .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
-                check_session(s, session_id)?;
-                if ended.is_some() && s.playback_id != ended {
-                    return Err(ApiError::new(ErrorCode::Conflict));
-                }
-                let next = next_position(&s.queue, forward, ended.is_some(), |id| {
-                    state.tracks.contains_key(id)
-                });
-                s.queue.position = next;
-                s.queue.revision = s.queue.revision.wrapping_add(1);
-                s.queue.checkpoint(&s.lease);
-                s.playback_id = None;
-                s.playback_cancel.cancel();
-                if next.is_none()
-                    && let Some(playback) = &s.playback
-                {
-                    playback.stop()?;
-                }
-                (s.queue.info(), s.context.clone())
-            };
-            self.events.emit(&context, EventData::Queue(info.clone()));
-            if info.current_track_id.is_some() {
-                self.play_queue_item(session_id, info.queue_id).await?;
+            let (info, pending) = self
+                .reserve_advance_queue(session_id, forward, ended, expected_generation)
+                .await?;
+            if let Some(pending) = pending {
+                self.play_queue_item(session_id, pending).await?;
             }
             Ok(info)
         })
+    }
+
+    pub(super) async fn reserve_advance_queue(
+        &self,
+        session_id: Uuid,
+        forward: bool,
+        ended: Option<Uuid>,
+        expected_generation: Option<Uuid>,
+    ) -> Result<(QueueInfo, Option<PendingPlayback>), ApiError> {
+        let expected = match expected_generation {
+            Some(generation) => generation,
+            None => self.playback_generation(session_id).await?,
+        };
+        let reader = self.local_reader(session_id).await?;
+        let state = reader.state().await?;
+        let (info, context, pending) = {
+            let mut guard = self.session.lock().await;
+            let s = guard
+                .as_mut()
+                .ok_or_else(|| ApiError::new(ErrorCode::NoProfile))?;
+            check_session(s, session_id)?;
+            s.check_playback_generation(expected)?;
+            if ended.is_some() && s.playback_id != ended {
+                return Err(ApiError::new(ErrorCode::Conflict));
+            }
+            let next = next_position(&s.queue, forward, ended.is_some(), |id| {
+                state.tracks.contains_key(id)
+            });
+            s.queue.position = next;
+            s.queue.revision = s.queue.revision.wrapping_add(1);
+            s.queue.checkpoint(&s.lease);
+            s.invalidate_playback();
+            if next.is_none()
+                && let Some(playback) = &s.playback
+            {
+                playback.stop()?;
+            }
+            let pending = s.reserve_queue_item();
+            (s.queue.info(), s.context.clone(), pending)
+        };
+        self.events.emit(&context, EventData::Queue(info.clone()));
+        Ok((info, pending))
     }
 }
 
@@ -562,7 +596,7 @@ impl Backend {
                 return Err(ApiError::new(ErrorCode::InvalidInput));
             }
         }
-        let (info, context, restart) = {
+        let (info, context, pending) = {
             let mut guard = self.session.lock().await;
             let s = guard
                 .as_mut()
@@ -592,17 +626,21 @@ impl Backend {
             let restart = s.queue.edit(action)?;
             s.queue.checkpoint(&s.lease);
             if restart {
-                s.playback_cancel.cancel();
-                s.playback_id = None;
+                s.invalidate_playback();
                 if let Some(playback) = &s.playback {
                     playback.stop()?;
                 }
             }
-            (s.queue.info(), s.context.clone(), restart)
+            let pending = if restart {
+                s.reserve_queue_item()
+            } else {
+                None
+            };
+            (s.queue.info(), s.context.clone(), pending)
         };
         self.events.emit(&context, EventData::Queue(info.clone()));
-        if restart && info.current_track_id.is_some() {
-            self.play_queue_item(session_id, info.queue_id).await?;
+        if let Some(pending) = pending {
+            self.play_queue_item(session_id, pending).await?;
         }
         Ok(info)
     }
@@ -611,6 +649,181 @@ impl Backend {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    async fn playback_fixture() -> (tempfile::TempDir, Backend, Uuid, Uuid) {
+        use vault_domain::{Action, ChatId, Event, MessageId, Metadata, Source, UserId};
+        let temp = tempfile::tempdir().unwrap();
+        let backend = Backend::new(ProfileStore::at(temp.path()).unwrap(), "missing-tdjson.so");
+        let profile = backend.create_profile("Pending playback".into()).unwrap();
+        let session_id = backend
+            .switch_profile(profile.profile_id)
+            .await
+            .unwrap()
+            .context
+            .session_id;
+        let binding = Binding {
+            vault_id: Uuid::new_v4(),
+            owner_id: UserId::new(42).unwrap(),
+            chat_id: ChatId::new(-100).unwrap(),
+        };
+        let track = Uuid::new_v4();
+        let mut db = Database::open(temp.path().join("fixture.sqlite"), binding).unwrap();
+        db.apply_record(
+            MessageId::new(1).unwrap(),
+            &Record::Event(Box::new(Event {
+                vault_id: binding.vault_id,
+                op_id: Uuid::new_v4(),
+                device_id: "fixture".into(),
+                base_generation: 0,
+                entity_id: track,
+                action: Action::TrackRegister {
+                    metadata: Metadata {
+                        title: "Pending track".into(),
+                        ..Default::default()
+                    },
+                    source: Source {
+                        source_id: Uuid::new_v4(),
+                        chat_id: binding.chat_id,
+                        message_id: MessageId::new(100).unwrap(),
+                        sha256: None,
+                        size_bytes: None,
+                    },
+                },
+            })),
+        )
+        .unwrap();
+        backend.session.lock().await.as_mut().unwrap().reader = Some(ProjectionReader::new(db));
+        (temp, backend, session_id, track)
+    }
+
+    #[tokio::test]
+    async fn stop_before_decoder_creation_cancels_reserved_and_delayed_playback() {
+        let (_temp, backend, session_id, track) = playback_fixture().await;
+        let generation = backend.playback_generation(session_id).await.unwrap();
+        // Hold the continuation at the exact boundary between queue publication
+        // and source resolution; no hardware or scheduling sleeps are needed.
+        let (queue, pending) = backend
+            .replace_queue(session_id, vec![track], 0, true, generation)
+            .await
+            .unwrap();
+        let pending = pending.unwrap();
+        let delayed = pending.ticket;
+        assert!(!pending.cancel.is_cancelled());
+        assert!(matches!(
+            backend
+                .control_playback(session_id, PlaybackAction::Stop)
+                .await
+                .unwrap(),
+            vault_media::PlaybackState::Idle
+        ));
+        assert!(pending.cancel.is_cancelled());
+        assert_eq!(
+            backend
+                .play_queue_item(session_id, pending)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Cancelled
+        );
+        // A queue lookup started before Stop must not allocate a new ticket.
+        assert_eq!(
+            backend
+                .replace_queue(session_id, vec![track], 0, true, delayed)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            ErrorCode::Cancelled
+        );
+        let stopped = backend.playback_queue(session_id, 0, 10).await.unwrap();
+        assert_eq!(stopped.info.queue_id, queue.queue_id);
+        assert_eq!(stopped.info.current_track_id, Some(track));
+        // A new explicit request made after Stop can reserve the same track.
+        let generation = backend.playback_generation(session_id).await.unwrap();
+        let (_, fresh) = backend
+            .replace_queue(session_id, vec![track], 0, true, generation)
+            .await
+            .unwrap();
+        assert!(!fresh.unwrap().cancel.is_cancelled());
+        backend.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_fences_pending_navigation_and_late_natural_end() {
+        let (_temp, backend, session_id, track) = playback_fixture().await;
+        let generation = backend.playback_generation(session_id).await.unwrap();
+        let (_, pending) = backend
+            .replace_queue(session_id, vec![track, track], 0, true, generation)
+            .await
+            .unwrap();
+        let pending = pending.unwrap();
+        let playback_id = Uuid::new_v4();
+        backend.session.lock().await.as_mut().unwrap().playback_id = Some(playback_id);
+        backend.disconnect(session_id).await.unwrap();
+        assert!(pending.cancel.is_cancelled());
+        assert_eq!(
+            backend
+                .advance_queue(session_id, true, None, Some(pending.ticket))
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Cancelled
+        );
+        assert_eq!(
+            backend
+                .advance_queue(session_id, true, Some(playback_id), None)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(
+            backend
+                .playback_queue(session_id, 0, 10)
+                .await
+                .unwrap()
+                .info
+                .position,
+            Some(0)
+        );
+        backend.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn repeated_navigation_reserves_each_occurrence_before_resolution() {
+        let (_temp, backend, session_id, track) = playback_fixture().await;
+        backend
+            .set_queue(session_id, vec![track, track, track], 0, false)
+            .await
+            .unwrap();
+        let first = backend
+            .reserve_navigation(session_id, PlaybackAction::Next, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = backend
+            .reserve_navigation(session_id, PlaybackAction::Next, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.cancel.is_cancelled());
+        assert!(!second.cancel.is_cancelled());
+        assert_eq!(
+            backend
+                .playback_queue(session_id, 0, 10)
+                .await
+                .unwrap()
+                .info
+                .position,
+            Some(2)
+        );
+        backend
+            .control_playback(session_id, PlaybackAction::Stop)
+            .await
+            .unwrap();
+        assert!(second.cancel.is_cancelled());
+        backend.shutdown().await.unwrap();
+    }
+
     #[test]
     fn checkpoint_restores_occurrences_and_history_without_starting_audio() {
         let temp = tempfile::tempdir().unwrap();
