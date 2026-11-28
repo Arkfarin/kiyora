@@ -49,6 +49,7 @@ class PlaybackService : Service() {
     internal val isForeground: Boolean get() = foreground
     private var receiverRegistered = false
     private var pausedAt: Long? = null
+    private var wakeRenewedAt = 0L
     private val pendingIntents = mutableListOf<PendingIntent>()
     private val watchdog = object : Runnable {
         override fun run() {
@@ -299,7 +300,13 @@ class PlaybackService : Service() {
 
     private fun renewWakeLock() {
         // Rust reports state once per second; the timeout bounds a dead bridge.
-        if (!wake.isHeld) wake.acquire(10 * 60 * 1000L)
+        // Refresh before expiration so a locked device cannot suspend the
+        // engine between the timeout and the next state update.
+        val now = SystemClock.elapsedRealtime()
+        if (!wake.isHeld || now - wakeRenewedAt >= 60_000L) {
+            wake.acquire(10 * 60 * 1000L)
+            wakeRenewedAt = now
+        }
     }
 
     private fun action(name: String): PendingIntent {
