@@ -348,18 +348,19 @@ class BackendController extends ChangeNotifier {
     }
   }
 
-  Future<void> operate(Future<void> Function(auth.Operation) command) =>
-      action(() async {
-        final operation = await auth.Operation.newInstance();
-        _operation = operation;
-        notifyListeners(); // The wait is cancellable only once the handle exists.
-        try {
-          await command(operation);
-        } finally {
-          if (identical(_operation, operation)) _operation = null;
-          await operation.cancel();
-        }
-      });
+  Future<void> operate(Future<void> Function(auth.Operation) command) => action(
+    () async {
+      final operation = await auth.Operation.newInstance();
+      _operation = operation;
+      notifyListeners(); // The wait is cancellable only once the handle exists.
+      try {
+        await command(operation);
+      } finally {
+        if (identical(_operation, operation)) _operation = null;
+        await operation.cancel();
+      }
+    },
+  );
 
   Future<void> cancel() async => _operation?.cancel();
   void clearError() {
@@ -419,6 +420,13 @@ class BackendController extends ChangeNotifier {
   });
   Future<void> reconnect() => action(() async {
     authorization = await auth.reconnect(sessionId: sessionId);
+    await _resubscribe();
+  });
+
+  /// Sign out of Telegram without deleting the local profile or its library.
+  Future<void> logoutTelegram() => action(() async {
+    await auth.logout(sessionId: sessionId);
+    authorization = const auth.Authorization.closed();
     await _resubscribe();
   });
 

@@ -15,9 +15,11 @@ import '../features/imports/import_selection.dart';
 import '../features/library/library_view.dart';
 import '../features/library/track_actions.dart';
 import '../features/lyrics/lyrics_view.dart';
+import '../features/onboarding/onboarding.dart';
 import '../features/player/player.dart';
 import '../features/queue/queue_view.dart';
 import '../features/settings/settings_view.dart';
+import '../features/settings/profile_menu.dart';
 
 enum ContextPanel { playing, queue, lyrics }
 
@@ -176,6 +178,22 @@ class _MusicShellState extends State<MusicShell> {
     );
   }
 
+  void _openLogin() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => Scaffold(
+          appBar: AppBar(title: const Text('Войти в Telegram')),
+          body: SafeArea(
+            child: Onboarding(
+              backend: b,
+              onConnected: () => Navigator.of(routeContext).pop(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _panelContent(ContextPanel panel, {bool mobile = false}) =>
       switch (panel) {
         ContextPanel.queue => QueueView(backend: b),
@@ -232,6 +250,7 @@ class _MusicShellState extends State<MusicShell> {
         backend: b,
         themeMode: widget.themeMode,
         onThemeChanged: widget.onThemeChanged,
+        onLogin: _openLogin,
       ),
       _ => LibraryView(
         key: key,
@@ -304,20 +323,17 @@ class _MusicShellState extends State<MusicShell> {
                 ? AppBar(
                     leading: _navigation.canBack
                         ? BackButton(onPressed: _navigation.back)
-                        : IconButton(
-                            tooltip: 'Аккаунт и настройки',
-                            onPressed: () => _go(Destination.settings),
-                            icon: const Icon(Icons.account_circle_outlined),
-                          ),
+                        : null,
                     title: const Text(
                       'KIYORA',
                       style: TextStyle(fontWeight: FontWeight.w900),
                     ),
                     actions: [
-                      IconButton(
-                        tooltip: 'Настройки',
-                        onPressed: () => _go(Destination.settings),
-                        icon: const Icon(Icons.settings_outlined),
+                      ProfileMenuButton(
+                        backend: b,
+                        showName: width >= 430,
+                        onSettings: () => _go(Destination.settings),
+                        onLogin: _openLogin,
                       ),
                     ],
                   )
@@ -404,12 +420,11 @@ class _MusicShellState extends State<MusicShell> {
                                   ),
                                 ),
                                 const SizedBox(width: 16),
-                                IconButton(
-                                  tooltip: 'Аккаунт и настройки',
-                                  onPressed: () => _go(Destination.settings),
-                                  icon: const Icon(
-                                    Icons.account_circle_outlined,
-                                  ),
+                                ProfileMenuButton(
+                                  backend: b,
+                                  showName: width >= 900,
+                                  onSettings: () => _go(Destination.settings),
+                                  onLogin: _openLogin,
                                 ),
                               ],
                             ),

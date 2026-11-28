@@ -7,10 +7,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/vault.dart' as vault;
 import '../../core/state/backend_controller.dart';
+import '../settings/profile_menu.dart';
 
 class Onboarding extends StatefulWidget {
-  const Onboarding({super.key, required this.backend});
+  const Onboarding({super.key, required this.backend, this.onConnected});
   final BackendController backend;
+  final VoidCallback? onConnected;
   @override
   State<Onboarding> createState() => _OnboardingState();
 }
@@ -55,10 +57,17 @@ class _OnboardingState extends State<Onboarding> {
             shrinkWrap: true,
             padding: const EdgeInsets.all(28),
             children: [
-              Text(
-                'KIYORA',
-                style: Theme.of(context).textTheme.headlineLarge
-                    ?.copyWith(fontWeight: FontWeight.w900),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'KIYORA',
+                      style: Theme.of(context).textTheme.headlineLarge
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  ProfileMenuButton(backend: b, showName: false),
+                ],
               ),
               const SizedBox(height: 40),
               if (b.starting) ...[
@@ -138,6 +147,18 @@ class _OnboardingState extends State<Onboarding> {
           onPressed: b.busy ? null : b.connect,
           child: const Text('Войти в Telegram'),
         ),
+      ];
+    }
+    if (authorization is auth.Authorization_Ready && b.hasLibrary) {
+      return [
+        _heading('Telegram подключён'),
+        const Text('Ваш профиль снова готов к синхронизации.'),
+        const SizedBox(height: 24),
+        if (widget.onConnected != null)
+          FilledButton(
+            onPressed: widget.onConnected,
+            child: const Text('Вернуться к медиатеке'),
+          ),
       ];
     }
     if (authorization is auth.Authorization_Ready)

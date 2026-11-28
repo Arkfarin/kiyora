@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/bridge/generated/api/auth.dart' as auth;
 import '../../core/bridge/generated/api/offline.dart' as offline;
 import '../../core/state/backend_controller.dart';
+import 'profile_menu.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({
@@ -10,10 +11,12 @@ class SettingsView extends StatefulWidget {
     required this.backend,
     required this.themeMode,
     required this.onThemeChanged,
+    this.onLogin,
   });
   final BackendController backend;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeChanged;
+  final VoidCallback? onLogin;
   @override
   State<SettingsView> createState() => _SettingsViewState();
 }
@@ -46,6 +49,11 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             const SizedBox(height: 28),
             _title('Аккаунт'),
+            Text(
+              'Выберите профиль или создайте новый. Медиатеки каждого профиля сохраняются отдельно.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
             RadioGroup<String>(
               groupValue: b.session?.profileId,
               onChanged: (id) {
@@ -63,43 +71,33 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             ListTile(
+              leading: const Icon(Icons.person_add_alt_1_outlined),
+              title: const Text('Добавить профиль'),
+              onTap: b.busy ? null : () => showCreateProfileDialog(context, b),
+            ),
+            ListTile(
               title: const Text('Подключиться снова'),
               subtitle: Text(b.details?.connection ?? ''),
               trailing: const Icon(Icons.refresh),
               onTap: b.busy ? null : b.reconnect,
             ),
             ListTile(
+              leading: const Icon(Icons.logout),
               title: const Text('Выйти из Telegram'),
-              onTap: b.busy
-                  ? null
-                  : () async {
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Выйти из Telegram?'),
-                          content: const Text(
-                            'Для синхронизации потребуется снова войти в аккаунт.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Отмена'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Выйти'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmed == true) {
-                        await b.action(() async {
-                          await auth.logout(sessionId: b.sessionId);
-                        });
-                        await b.refresh();
-                      }
-                    },
+              subtitle: const Text(
+                'Локальная медиатека останется на устройстве',
+              ),
+              onTap: b.busy ? null : () => confirmTelegramLogout(context, b),
             ),
+            if (widget.onLogin != null &&
+                b.hasLibrary &&
+                b.authorization is! auth.Authorization_Ready)
+              ListTile(
+                leading: const Icon(Icons.login),
+                title: const Text('Войти в Telegram'),
+                subtitle: const Text('Для синхронизации музыки'),
+                onTap: b.busy ? null : widget.onLogin,
+              ),
             const SizedBox(height: 28),
             _title('Оформление'),
             DropdownButtonFormField<ThemeMode>(
