@@ -66,7 +66,7 @@ The design keeps the user interface separate from the Rust engine responsible fo
 | Platform | Current priority |
 | --- | --- |
 | 🐧 Linux | **Primary development focus** |
-| 🤖 Android | Planned after the Linux experience is stabilized |
+| 🤖 Android | Active development; device acceptance pending |
 | 🪟 Windows | Planned after the Linux experience is stabilized |
 
 Platform support and release timing are not guaranteed. A working source tree does not necessarily mean that an installable, tested build is available.
@@ -79,11 +79,13 @@ The Flutter application is located in [`flutter/`](flutter/). The native Cargo w
 
 For technical context, see the [Flutter migration notes](docs/FLUTTER_LINUX_MIGRATION.md) and the [Flutter release-readiness notes](docs/FLUTTER_LINUX_RELEASE.md). Verification scope and remaining checks are recorded in the [Linux testing notes](docs/FLUTTER_LINUX_TESTING.md).
 
+For Android prerequisites, APK/AAB packaging and the device verification checklist, see [Android build and testing](docs/ANDROID_BUILD_AND_TESTING.md).
+
 **No stable binaries or one-command setup are promised at this stage.**
 
 ## Project Status
 
-The immediate priority is building a stable, usable **Linux application** before expanding platform support. The interface, native integration, reliability, and packaging are all subject to continued development.
+Linux remains an active regression target, and Android is now an active implementation target. The interface, native integration, reliability, and packaging are all subject to continued development. Windows remains deferred.
 
 If you are following the project, expect frequent changes and occasional breakage while the architecture and user experience are refined.
 

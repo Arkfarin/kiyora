@@ -1,7 +1,7 @@
 # Flutter Linux verification
 
-Target: Linux x86_64. Windows and Android implementation and acceptance are
-explicitly deferred. This document records current checks, not release approval.
+Target: Linux x86_64. Android has a [separate verification plan](ANDROID_BUILD_AND_TESTING.md).
+Windows remains deferred. This document records Linux checks, not release approval.
 
 ## Environment and commands
 
