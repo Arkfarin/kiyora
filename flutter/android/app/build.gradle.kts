@@ -25,8 +25,10 @@ fun signingProperty(name: String): String =
     }
 
 
+val supportedNativeAbis = setOf("arm64-v8a", "x86_64")
 val nativeAbis = providers.environmentVariable("KIYORA_ANDROID_ABIS").orElse("arm64-v8a").get().split(',')
-require(nativeAbis.all { it in listOf("arm64-v8a", "x86_64") })
+require(nativeAbis.isNotEmpty() && nativeAbis.size == nativeAbis.toSet().size &&
+    nativeAbis.all { it in supportedNativeAbis })
 
 android {
     namespace = "io.github.arkfarin.kiyora"
@@ -70,6 +72,12 @@ android {
         assets.srcDir(file("../../../rust/target/native/android-assets"))
     }
     packaging.jniLibs.useLegacyPackaging = true
+    // AGP merges all ABI folders from explicitly registered jniLibs source
+    // directories even when ndk.abiFilters is set. Without this exclusion,
+    // an ARM64-only APK can accidentally contain the x86_64 TDLib binary.
+    packaging.jniLibs.excludes.addAll(
+        (supportedNativeAbis - nativeAbis.toSet()).map { "**/$it/**" }
+    )
     buildTypes {
         release {
             // Keep the existing application signing identity.
